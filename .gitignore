@@ -1,0 +1,24 @@
+# Negeer alle mappen met ruwe en verwerkte data
+data/
+results/
+FM_EO_dataset/
+CP_FM_dataset/
+TDBRAIN-dataset/
+Chronicpainset/
+
+# Negeer specifieke grote data-extensies
+*.fif
+*.vhdr
+*.vmrk
+*.eeg
+
+# Negeer Excel bestanden (met participant ID's)
+*.xlsx
+*.csv
+*.log
+
+# Negeer Python systeem mapjes en virtuele omgevingen
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+thesis_env/
