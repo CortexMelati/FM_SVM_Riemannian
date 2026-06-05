@@ -72,7 +72,7 @@ except ImportError:
 # =============================================================================
 OUTPUT_DIR = RESULTS_DIR
 
-NUM_SUBJECTS_TO_PROCESS = 1 #change to None for all files or nr. of files to process
+NUM_SUBJECTS_TO_PROCESS = None # Change to None for all files or nr. of files to process
 
 # We focus purely on the CP_FM_dataset for this script, filtering for fmpa/fmhc later.
 DATASETS = [
@@ -155,50 +155,44 @@ def load_raw_data(filepath):
     raw = fix_scaling_and_units(raw)
     return raw
 
-def extract_connectivity_features(epochs, subject_id, condition):
+def extract_connectivity_features(epochs, subject_id, condition, segment_idx):
     """
     Computes Spectral Connectivity (Coherence) using the method from Li et al. (2026).
-    Returns a dataframe containing 855 features (171 pairs * 5 bands).
+    Returns a dataframe containing 855 features (171 pairs * 5 bands) for ONE 30s segment.
     """
     band_names = list(FREQ_BANDS.keys())
     ch_names = epochs.ch_names
     n_channels = len(ch_names)
     
-    features = {'Subject': subject_id, 'Condition': condition}
+    # NIEUW: We voegen 'Segment' toe aan de metadata
+    features = {'Subject': subject_id, 'Condition': condition, 'Segment': segment_idx}
     
-    # Iterate over each frequency band separately to ensure robust computation
     for band_name in band_names:
         fmin, fmax = FREQ_BANDS[band_name]
         
-        # Compute Coherence for this specific band
-        # Using sfreq from the epochs to ensure proper scaling
         con = spectral_connectivity_epochs(
             epochs, 
             method='coh', 
             mode='multitaper',
             fmin=fmin, 
             fmax=fmax, 
-            faverage=True,  # Average the coherence within this specific frequency band
+            faverage=True,
             verbose=False
         )
         
-        # Dense output gives a matrix of shape (n_channels, n_channels, 1) because faverage=True
         con_dense = con.get_data(output='dense')
         
-        # Extract the upper triangle (171 pairs for 19 channels)
         for i in range(n_channels):
             for j in range(i + 1, n_channels):
-                # Format exactly as in paper, e.g., "Fz-Cz(gamma)"
                 ch_pair = f"{ch_names[i]}-{ch_names[j]}({band_name.lower()})"
-                # con_dense has shape (n_channels, n_channels, 1) -> we take [i, j, 0]
-                features[ch_pair] = con_dense[i, j, 0]
+                # LOWER triangle ophalen
+                features[ch_pair] = con_dense[j, i, 0]
                 
     return pd.DataFrame([features])
 
 def process_subject(file_path, output_dir, dataset_name):
     filename = os.path.basename(file_path)
     
-    # 1. Dataset & Subject Filtering
     if not is_target_subject(filename):
         return False, "Skipped (Not fmpa or fmhc target)"
         
@@ -219,10 +213,8 @@ def process_subject(file_path, output_dir, dataset_name):
        return True, "Skipped (Already fully processed)"
 
     try:
-        # 2. LOAD DATA
         raw = load_raw_data(file_path)
 
-        # 3. CHANNEL SELECTION
         available = raw.ch_names
         missing = [ch for ch in COMMON_CHANNELS if ch not in available]
         if missing: return False, f"Missing core channels: {missing}"
@@ -232,37 +224,67 @@ def process_subject(file_path, output_dir, dataset_name):
         raw.set_montage(montage, on_missing='ignore')
         raw.set_eeg_reference('average', projection=False, verbose=False)
 
-        # 4. PREPROCESSING (Li et al., 2026 guidelines)
         if raw.times[-1] <= 10.0: return False, "Recording too short (<= 10s)"
         
-        # Plot before cropping
         try: fig_before = get_plots(raw, step="1. Raw (Pre-crop)", scalings={'eeg': 100e-6}, channel_idx=[9])
         except: fig_before = None
 
         # Discard first 10s
         raw.crop(tmin=10.0, tmax=None)
         
-        # Apply filters
         raw.notch_filter(NOTCH_FREQ, verbose=False) 
         raw.filter(l_freq=FILTER_HP, h_freq=FILTER_LP, verbose=False)
         
-        # Resample if needed
         sfreq = SFREQ_MAP.get(dataset_name, 500)
         if raw.info['sfreq'] != sfreq: raw.resample(sfreq, verbose=False)
 
-        # 5. EPOCHING (1-second blocks)
-        epochs = mne.make_fixed_length_epochs(raw, duration=EPOCH_LENGTH, overlap=0, preload=True, verbose=False)
-        if len(epochs) < 10: return False, "Too few epochs generated"
+        # ==============================================================
+        # NIEUW: MACRO-SEGMENTATIE LOGICA (Li et al., 2026)
+        # ==============================================================
+        all_features = []
+        all_epochs_data = []
+        n_total_epochs = 0
+        n_segments_used = 0
+        
+        # We itereren om maximaal 5 segmenten van 30 seconden te halen
+        for seg_idx in range(5):
+            tmin_seg = seg_idx * 30.0
+            tmax_seg = (seg_idx + 1) * 30.0
+            
+            # Check of er nog 30 seconden data over is voor dit segment
+            if raw.times[-1] < tmax_seg:
+                break
+                
+            # Maak een tijdelijke kopie van precies 30 seconden
+            raw_seg = raw.copy().crop(tmin=tmin_seg, tmax=tmax_seg)
+            
+            # Knip deze 30s op in de 1-seconde micro-epochs
+            epochs = mne.make_fixed_length_epochs(raw_seg, duration=EPOCH_LENGTH, overlap=0, preload=True, verbose=False)
+            
+            if len(epochs) < 10: 
+                continue # Negeer segmenten die cumulatief te kort zijn
+                
+            n_total_epochs += len(epochs)
+            n_segments_used += 1
+            all_epochs_data.append(epochs.get_data(copy=True))
+            
+            # Feature extractie voor DIT specifieke 30s segment
+            df_seg = extract_connectivity_features(epochs, subject_id, condition, seg_idx + 1)
+            all_features.append(df_seg)
+            
+        if not all_features:
+            return False, "Te weinig data over voor zelfs één 30s segment."
 
-        # 6. FEATURE EXTRACTION (Spectral Connectivity)
-        df_features = extract_connectivity_features(epochs, subject_id, condition)
+        # Voeg alle rijen (maximaal 5) samen tot één DataFrame en sla op
+        df_features = pd.concat(all_features, ignore_index=True)
         df_features.to_csv(csv_check, index=False)
 
-        # 7. REPORTING
+        # 7. REPORTING (We plotten alleen de gecombineerde epochs als voorbeeld)
         try:
-            data_tmp = epochs.get_data(copy=True)
-            raw_epoched = mne.io.RawArray(np.hstack(data_tmp), epochs.info, verbose=False)
-            fig_after = get_plots(raw_epoched, step="2. Filtered & Epoched", scalings={'eeg': 40e-6}, channel_idx=[9])
+            combined_data = np.vstack(all_epochs_data)
+            temp_info = mne.create_info(ch_names=epochs.ch_names, sfreq=epochs.info['sfreq'], ch_types='eeg')
+            raw_epoched = mne.io.RawArray(np.hstack(combined_data), temp_info, verbose=False)
+            fig_after = get_plots(raw_epoched, step=f"2. Epoched ({n_segments_used}x 30s)", scalings={'eeg': 40e-6}, channel_idx=[9])
         except: fig_after = None
 
         with PdfPages(pdf_check) as pdf:
@@ -270,27 +292,25 @@ def process_subject(file_path, output_dir, dataset_name):
             if fig_after: pdf.savefig(fig_after)
         plt.close('all')
 
-        # 8. CLEAN DATA SAVE (No RANSAC/AR)
-        np.save(os.path.join(save_dir, f"{subject_id}_{condition}_cleaned.npy"), epochs.get_data(copy=True))
+        # 8. CLEAN DATA SAVE
+        np.save(os.path.join(save_dir, f"{subject_id}_{condition}_cleaned.npy"), combined_data)
 
         # 9. LOGGING
-        n_total = len(epochs)
-        num_features = df_features.shape[1] - 2 # Exclude Subject & Condition cols
+        num_features = df_features.shape[1] - 3 # Exclude Subject, Condition & Segment cols
         
         log_lines = [
             f"Preprocessing Report for {subject_id} ({condition})",
             "="*45,
-            f"Methodology:         Li et al. (2026) Raw EEG Analysis",
+            f"Methodology:         Li et al. (2026) Segmented Raw EEG",
             f"Initial Cropping:    Discarded first 10 seconds",
-            f"Filters applied:     {FILTER_HP} - {FILTER_LP} Hz bandpass, {NOTCH_FREQ} Hz notch",
-            f"Artifact Rejection:  None (No RANSAC or AutoReject applied)",
-            f"Total Epochs (1s):   {n_total}",
+            f"Macro-Segments (30s):{n_segments_used} out of 5 requested",
+            f"Micro-Epochs (1s):   {n_total_epochs} total over all segments",
             f"Extracted Features:  {num_features} Connectivity pairs (Coherence)"
         ]
         with open(os.path.join(save_dir, f"{subject_id}_{condition}_processing_log.txt"), 'w') as f:
             f.write("\n".join(log_lines))
 
-        return True, f"OK (Processed {n_total} epochs, {num_features} features)"
+        return True, f"OK ({n_segments_used} segment(s), {n_total_epochs} epochs)"
 
     except Exception as e:
         plt.close('all')
