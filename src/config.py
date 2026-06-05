@@ -70,8 +70,8 @@ ITRS_TMAX = 1.348         # Exactly 337 samples at 250Hz (approx. 1350 ms)
 # The exact 19 channels utilized in the core feature space of the paper
 CHANNELS_1020 = [
     'Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8',
-    'T3', 'C3', 'Cz', 'C4', 'T4',
-    'T5', 'P3', 'Pz', 'P4', 'T6',
+    'T7', 'C3', 'Cz', 'C4', 'T8',   # T3 -> T7, T4 -> T8
+    'P7', 'P3', 'Pz', 'P4', 'P8',   # T5 -> P7, T6 -> P8
     'O1', 'O2'
 ]
 
@@ -83,14 +83,6 @@ CHANNEL_RENAMING_MAP = {
 }
 
 
-# # Standard 10-20 System (20 Channels) old (TDBrain and chronicpainset)
-# CHANNELS = [
-#     'Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8',
-#     'T7', 'C3', 'Cz', 'C4', 'T8',
-#     'P7', 'P3', 'Pz', 'P4', 'P8',
-#     'O1', 'Oz', 'O2'
-# ]
-
 # ==============================================================================
 # 4. FREQUENCY BANDS OF INTEREST
 # ==============================================================================
@@ -98,15 +90,16 @@ CHANNEL_RENAMING_MAP = {
 BANDS = {
     'Delta': (1, 4),
     'Theta': (4, 8),
-    'Alpha': (8, 12),     # Adjusted to strict 12 Hz boundary
+    'Alpha': (8, 12),    
     'Beta':  (12, 30),
-    'Gamma': (30, 40)     # Capped at 40 Hz due to the 44 Hz low-pass filter constraints
+    'Gamma': (30, 40)     # capped at 40 as stated in the paper from li et al. 
 }
 
 # ==============================================================================
 # 5. MACHINE LEARNING & VISUALIZATION METRICS
 # ==============================================================================
 RANDOM_STATE = 42
+TEST_SIZE = 0.20
 MIN_AGE = 18.0
 
 
@@ -147,3 +140,15 @@ if __name__ == "__main__":
         print(f"   -> final_dataset.csv found! ✅")
     else:
         print(f"   -> ⚠️ final_dataset.csv not yet generated in the results folder.")
+        
+        
+# ==============================================================================
+# 6. CLASS LABELING / NAMING CONVENTIONS
+# ==============================================================================
+# Substrings in filenames used to automatically assign target labels 
+# (0 = Healthy Control, 1 = Chronic Pain / Fibromyalgia)
+
+LABEL_MAPPING = {
+    'Healthy_0': ['FMHC', 'HC', 'HEALTHY'],
+    'Patient_1': ['FMPA', 'FM'] 
+}

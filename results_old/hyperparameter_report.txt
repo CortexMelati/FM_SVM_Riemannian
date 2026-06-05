@@ -1,0 +1,11 @@
+====================================================
+🏆 SVM HYPERPARAMETER REPORT - SPECTRAL
+====================================================
+Date: 2026-06-03 16:41:08
+Cross-Validation Balanced Accuracy: 99.67%
+
+Best Parameters Found:
+  - C: 5
+  - gamma: scale
+
+
