@@ -27,6 +27,9 @@ import seaborn as sns
 from pathlib import Path
 import sys
 import joblib
+from sklearn.metrics import brier_score_loss
+from sklearn.manifold import TSNE
+import seaborn as sns
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix
 
@@ -47,11 +50,32 @@ test_results = []
 
 print(f"\n📊 Evaluating models on unseen data...")
 
+# Hulpfunctie voor ECE berekening
+def expected_calibration_error(y_true, y_prob, n_bins=10):
+    bin_limits = np.linspace(0, 1, n_bins + 1)
+    ece = 0.0
+    for i in range(n_bins):
+        bin_lower, bin_upper = bin_limits[i], bin_limits[i+1]
+        in_bin = (y_prob >= bin_lower) & (y_prob < bin_upper)
+        if i == n_bins - 1: # Zorg dat 1.0 wordt meegenomen in de laatste bin
+            in_bin = (y_prob >= bin_lower) & (y_prob <= bin_upper)
+        
+        if np.sum(in_bin) > 0:
+            bin_acc = np.mean(y_true[in_bin])
+            bin_conf = np.mean(y_prob[in_bin])
+            bin_weight = np.sum(in_bin) / len(y_prob)
+            ece += bin_weight * np.abs(bin_acc - bin_conf)
+    return ece
+
+
+
 for band in bands:
-    model_path = RESULTS_DIR / f"saved_model_{band}.pkl"
+    # 1. FIX: Gebruik de juiste prefix gebaseerd op de Ablation Switch
+    prefix = "ROI_" if USE_ROI else "ALL_"
+    model_path = RESULTS_DIR / f"saved_model_{prefix}{band}.pkl"
     
     if not model_path.exists():
-        print(f"⚠️ Model for {band} not found. Skipping...")
+        print(f"Waarschuwing: Model for {band} ({prefix}) not found. Skipping...")
         continue
         
     # 1. LOAD THE FROZEN ARTIFACTS
@@ -76,10 +100,16 @@ for band in bands:
     rec = recall_score(y_test, y_pred, zero_division=0)
     auc = roc_auc_score(y_test, y_prob)
     
+    brier = brier_score_loss(y_test, y_prob)
+    ece = expected_calibration_error(y_test, y_prob)
+    
+    # 2. FIX: Slechts één enkele append met alle data
     test_results.append({
         'Band': band.upper(),
         'Unseen_Accuracy': acc,
         'ROC_AUC': auc,
+        'Brier_Score': brier,
+        'ECE': ece,
         'Precision': prec,
         'Recall': rec
     })
@@ -96,17 +126,32 @@ for band in bands:
     plt.xlabel('Predicted Label', fontsize=12)
     plt.tight_layout()
 
-    plot_path = RESULTS_DIR / f"final_confusion_matrix_{band}.png"
+    # Gebruik ook hier de prefix bij het opslaan van de plots
+    plot_path = RESULTS_DIR / f"final_confusion_matrix_{prefix}{band}.png"
     plt.savefig(plot_path, dpi=300)
+    plt.close()
+    
+    # 6. GENERATE t-SNE
+    print(f"-> Generating t-SNE plot for {band}...")
+    tsne = TSNE(n_components=2, perplexity=min(30, len(X_test_final)-1), random_state=42)
+    X_tsne = tsne.fit_transform(X_test_final)
+    
+    plt.figure(figsize=(8, 6))
+    sns.scatterplot(x=X_tsne[:, 0], y=X_tsne[:, 1], hue=y_test, palette={0: '#1f77b4', 1: '#d62728'}, s=60, alpha=0.8)
+    plt.title(f't-SNE Data Distribution (mSFFS Features) - {band.upper()}')
+    plt.legend(title='Class', labels=['HC (0)', 'FM (1)'])
+    plt.tight_layout()
+    tsne_path = RESULTS_DIR / f"tsne_distribution_{prefix}{band}.png"
+    plt.savefig(tsne_path, dpi=300)
     plt.close()
 
 # --- SUMMARY REPORT ---
 print("\n" + "*"*80)
-print("🏆 FINAL TRUE PERFORMANCE ON UNSEEN TEST DATA")
+print(f"FINAL TRUE PERFORMANCE ON UNSEEN TEST DATA ({'ROI' if USE_ROI else 'ALL CHANNELS'})")
 print("*"*80)
 summary_df = pd.DataFrame(test_results).sort_values(by='Unseen_Accuracy', ascending=False)
 print(summary_df.to_string(index=False))
 
-summary_path = RESULTS_DIR / "final_test_results.csv"
+summary_path = RESULTS_DIR / f"final_test_results_{'ROI' if USE_ROI else 'ALL'}.csv"
 summary_df.to_csv(summary_path, index=False)
-print(f"\n💾 Validation results saved to: {summary_path}")
+print(f"\nValidation results saved to: {summary_path.name}")

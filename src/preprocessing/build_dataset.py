@@ -12,7 +12,7 @@ Overview:
         2. Subject-Level Split: Stratified 80/20 split based on unique subjects
            to prevent data leakage.
         3. Segment Sampling: Balances the training set by using 5 segments 
-           for Fibromyalgia patients and 3 segments for Healthy Controls.
+           for Fibromyalgia patients and 4 segments for Healthy Controls.
            (Note: Requires preprocessing pipeline to output multiple segments).
 
 Execution:
@@ -100,26 +100,41 @@ train_full_df = master_df[master_df['Subject'].isin(train_subs)].copy()
 test_df = master_df[master_df['Subject'].isin(test_subs)].copy()
 
 # =============================================================================
-# 3. SEGMENT SAMPLING FOR BALANCING (Li et al., 2026)
+# 3. SEGMENT SAMPLING FOR BALANCING (Li et al., 2026 Geoptimaliseerd)
 # =============================================================================
-# Training set: 5 sections from fmpa, 3 sections from fmhc
 sampled_train_data = []
 
+# Training set balancing: 5 voor FM, 4 voor HC
 for subject, group in train_full_df.groupby('Subject'):
     target = group['Target'].iloc[0]
     
     if target == 1:
-        # Fibromyalgia: Keep 5 segments
-        n_samples = min(5, len(group))
-        sampled_train_data.append(group.sample(n=n_samples, random_state=RANDOM_STATE))
+        # Fibromyalgia: we willen exact 5 segmenten
+        if len(group) >= 5:
+            sampled_train_data.append(group.sample(n=5, random_state=RANDOM_STATE))
+        else:
+            # Mocht een patiënt minder dan 5 segmenten hebben, neem alles wat er is
+            sampled_train_data.append(group)
     else:
-        # Healthy Control: Keep 3 segments
-        n_samples = min(3, len(group))
+        # Healthy Control: we willen exact 4 segmenten (jouw geoptimaliseerde ratio)
+        n_samples = min(4, len(group))
         sampled_train_data.append(group.sample(n=n_samples, random_state=RANDOM_STATE))
 
-# Concatenate and shuffle the final training set
 train_df = pd.concat(sampled_train_data).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
-test_df = test_df.sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
+
+# Hold-out testset validatie: Garandeer strict 5 segmenten per subject (Li et al., 2026)
+sampled_test_data = []
+for subject, group in test_df.groupby('Subject'):
+    if len(group) >= 5:
+        # Pak exact de eerste 5 macro-segmenten conform de benchmark-opzet
+        sampled_test_data.append(group.sort_values('Segment').head(5))
+    else:
+        print(f"⚠️ Subject {subject} uit hold-out set verwijderd: bezit slechts {len(group)}/5 segmenten.")
+
+if not sampled_test_data:
+    raise ValueError("🚨 Geen enkel subject in de hold-out testset heeft de vereiste 5 segmenten!")
+
+test_df_final = pd.concat(sampled_test_data).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
 
 # =============================================================================
 # 4. SAVE FINAL DATASETS
@@ -128,13 +143,14 @@ train_path = RESULTS_DIR / "final_dataset_train.csv"
 test_path = RESULTS_DIR / "final_dataset_test.csv"
 
 train_df.to_csv(train_path, index=False)
-test_df.to_csv(test_path, index=False)
+test_df_final.to_csv(test_path, index=False)
 
 print("\n" + "="*50)
-print("✅ DATASET CREATION SUCCESSFUL (Li et al. Methodology)")
+print("✅ DATASET CREATION SUCCESSFUL (Li et al. Methodology Aligned)")
 print("="*50)
 print(f"Train set saved: {train_path}")
-print(f"   -> Rows: {len(train_df)} (Balanced sampling applied)")
+print(f"   -> Rows: {len(train_df)} (Balanced sampling 5:4 applied)")
+print(f"   -> Unique Training Subjects: {train_df['Subject'].nunique()}")
 print(f"Test set saved:  {test_path}")
-print(f"   -> Rows: {len(test_df)} (All segments kept)")
-print("\nReady for Feature Selection (mSFFS) and SVM Training!")
+print(f"   -> Rows: {len(test_df_final)} (Strictly 5 segments per subject)")
+print(f"   -> Unique Test Subjects: {test_df_final['Subject'].nunique()}")

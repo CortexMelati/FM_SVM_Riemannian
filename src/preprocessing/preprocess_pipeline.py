@@ -23,7 +23,7 @@ Outputs (per subject):
     4. .txt files -> Logs containing preprocessing statistics
 
 Execution:
-    python ./FM_SVM/src/Preprocessing/preprocess_pipeline.py
+    python preprocess_pipeline.py
 =============================================================================
 """
 
@@ -49,7 +49,10 @@ sys.path.append(str(current_dir.parent))
 
 from config import (
     RESULTS_DIR, 
-    CP_FM_DIR, 
+    CP_FM_DIR,
+    FM_DIR,            
+    TDBRAIN_DIR,          
+    CHRONIC_PAIN_DIR,     
     CHANNELS_1020, 
     BANDS, 
     SFREQ_MAP, 
@@ -57,12 +60,13 @@ from config import (
     FILTER_HP,
     FILTER_LP,
     NOTCH_FREQ,
-    CHANNEL_RENAMING_MAP
+    CHANNEL_RENAMING_MAP,
+    LABEL_MAPPING         
 )
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
-    from preprocessing.preprocessing_plotting_old import get_plots
+    from preprocessing_plotting import get_plots
 except ImportError:
     print("⚠️ Warning: 'preprocessing_plotting.py' not found. Plots will be skipped.")
     def get_plots(*args, **kwargs): return None
@@ -71,12 +75,14 @@ except ImportError:
 # 1. CONFIGURATION & PATHS
 # =============================================================================
 OUTPUT_DIR = RESULTS_DIR
-
 NUM_SUBJECTS_TO_PROCESS = None # Change to None for all files or nr. of files to process
 
-# We focus purely on the CP_FM_dataset for this script, filtering for fmpa/fmhc later.
+# We focus purely on the CP_FM_dataset for this script, filter where needed.
 DATASETS = [
-    (str(CP_FM_DIR), "*.vhdr", "cp_fm_dataset")
+    (str(CP_FM_DIR), "*.vhdr", "cp_fm_dataset"),
+    #(str(FM_DIR), "*.vhdr", "fm_eo_dataset"),            # Jouw 499s Eyes Open data
+    #(str(TDBRAIN_DIR), "*.vhdr", "tdbrain_dataset"),     # Jouw 198s CP-HC data
+    #(str(CHRONIC_PAIN_DIR), "*.vhdr", "chronicpainset")  # Jouw 499s CP-only data
 ]
 
 COMMON_CHANNELS = CHANNELS_1020
@@ -94,10 +100,16 @@ def get_condition(filename):
     elif 'EO' in fname_upper or 'OPEN' in fname_upper: return 'EO'
     else: return 'unknown'
 
-def is_target_subject(filename):
-    """Filters specifically for Fibromyalgia patients (fmpa) and Healthy Controls (fmhc)."""
-    fname_lower = filename.lower()
-    return 'fmpa' in fname_lower or 'fmhc' in fname_lower
+def assign_label_from_filename(filename):
+    """Kijkt dynamisch of het bestand bij Healthy_0 of Patient_1 hoort o.b.v. config.py"""
+    fname_upper = filename.upper()
+    for label_key, identifiers in LABEL_MAPPING.items():
+        for identifier in identifiers:
+            if identifier in fname_upper:
+                # Returnt de pure mapnaam, bijv 'FM' of 'HC' voor de folderstructuur
+                return 'Patient' if 'Patient' in label_key else 'Control'
+    return None
+
 
 def smart_rename_channels(raw):
     """
@@ -193,16 +205,17 @@ def extract_connectivity_features(epochs, subject_id, condition, segment_idx):
 def process_subject(file_path, output_dir, dataset_name):
     filename = os.path.basename(file_path)
     
-    if not is_target_subject(filename):
-        return False, "Skipped (Not fmpa or fmhc target)"
+    # 1. Dynamische Label Check in plaats van hardcoded 'fmpa'
+    subject_group = assign_label_from_filename(filename)
+    if not subject_group:
+        return False, f"Skipped (No label in config.py for {filename})"
         
     condition = get_condition(filename)
-    if condition != 'EC':
-        return False, "Skipped (Not Eyes-Closed resting state)"
-        
+    
     subject_id = filename.split('_')[0] 
-    sub_folder = os.path.join('CP_FM', 'fmpa' if 'fmpa' in subject_id.lower() else 'fmhc')
-
+    
+    # Maak nette submappen aan op basis van de dataset EN de conditie
+    sub_folder = os.path.join(dataset_name, subject_group)
     save_dir = os.path.join(output_dir, sub_folder, subject_id)
     os.makedirs(save_dir, exist_ok=True)
     
@@ -279,18 +292,19 @@ def process_subject(file_path, output_dir, dataset_name):
         df_features = pd.concat(all_features, ignore_index=True)
         df_features.to_csv(csv_check, index=False)
 
-        # 7. REPORTING (We plotten alleen de gecombineerde epochs als voorbeeld)
+        # 7. REPORTING
         try:
-            combined_data = np.vstack(all_epochs_data)
-            temp_info = mne.create_info(ch_names=epochs.ch_names, sfreq=epochs.info['sfreq'], ch_types='eeg')
-            raw_epoched = mne.io.RawArray(np.hstack(combined_data), temp_info, verbose=False)
-            fig_after = get_plots(raw_epoched, step=f"2. Epoched ({n_segments_used}x 30s)", scalings={'eeg': 40e-6}, channel_idx=[9])
-        except: fig_after = None
+            # Gebruik de legitieme 'epochs'-variabele van het laatste 30s segment.
+            # Dit voorkomt spectrale transiënten door hstack-bewerkingen!
+            fig_after = get_plots(raw_seg, step=f"2. Preprocessed Segment (Last 30s)", scalings={'eeg': 40e-6}, channel_idx=[9])
+        except Exception as plot_err: 
+            print(f"⚠️ Quality Control Plot na preprocessing mislukt: {plot_err}")
+            fig_after = None
 
         with PdfPages(pdf_check) as pdf:
             if fig_before: pdf.savefig(fig_before)
             if fig_after: pdf.savefig(fig_after)
-        plt.close('all')
+            plt.close('all')
 
         # 8. CLEAN DATA SAVE
         np.save(os.path.join(save_dir, f"{subject_id}_{condition}_cleaned.npy"), combined_data)
@@ -320,47 +334,38 @@ def process_subject(file_path, output_dir, dataset_name):
 if __name__ == "__main__":
     print(f"🚀 Starting Connectivity Preprocessing Pipeline (Li et al. 2026)")
     if NUM_SUBJECTS_TO_PROCESS is not None:
-        print(f"⚠️ TEST MODE ACTIVE: Processing {NUM_SUBJECTS_TO_PROCESS} RANDOM subjects!")
+        print(f" TEST MODE ACTIVE: Processing {NUM_SUBJECTS_TO_PROCESS} RANDOM subjects!")
     
     all_files = []
     for folder, pattern, ds_name in DATASETS:
-        print(f"📂 Scanning {folder} for {pattern}...")
+        print(f" Scanning {folder} for {pattern}...")
         
         # Gebruik Pathlib voor robuuster zoeken (werkt beter over mappen heen)
         search_dir = Path(folder)
         if not search_dir.exists():
-            print(f"   ❌ FOUT: De map {search_dir} bestaat niet!")
+            print(f"   File {search_dir} does not exist!")
             continue
             
         # Vind alle bestanden (zoekt recursief door alle submappen)
         found_paths = list(search_dir.rglob(pattern))
         found = [str(p) for p in found_paths]
         
-        print(f"   -> Ruwe {pattern} bestanden gevonden: {len(found)}")
+        print(f"   -> Ruwe {pattern} files found: {len(found)}")
         
         valid_found = []
         for f in found:
             f_lower = f.lower()
             
-            # Sla output folders over (vermijd dat hij eerder geprocessde data pakt)
+            # skip output folders
             if 'clean' in f_lower or 'results' in f_lower:
                 continue
             
-            # --- PRE-FILTERING ---
-            filename = os.path.basename(f).lower()
+            # label via config.py
+            filename = os.path.basename(f)
+            if assign_label_from_filename(filename):
+                valid_found.append(f)
             
-            # Check of het een FM patiënt of HC is
-            if 'fmhc' not in filename and 'fmpa' not in filename:
-                continue
-                
-            # Check of het de ogen-dicht conditie is
-            if 'closed' not in filename and 'ec' not in filename:
-                continue
-            # ---------------------------------------
-                
-            valid_found.append(f)
-            
-        print(f"   -> Bestanden over na filteren (alleen fmpa/fmhc + closed): {len(valid_found)}")
+        print(f"   -> Bestanden over na filteren (valide labels): {len(valid_found)}")
         
         # Nu we alleen de juiste bestanden over hebben, pakken we er random 1 (of meer)
         if NUM_SUBJECTS_TO_PROCESS is not None and len(valid_found) > 0:

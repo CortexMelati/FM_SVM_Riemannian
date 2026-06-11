@@ -47,6 +47,13 @@ SFREQ_MAP = {
     "Chronicpainset": 500      # Native continuous system
 }
 
+# Substrings in filenames used to automatically assign target labels 
+# (0 = Healthy Control, 1 = Patient/Chronic Pain/Fibromyalgia)
+LABEL_MAPPING = {
+    'Healthy_0': ['FMHC'], #, 'HC', 'HEALTHY', 'CONTROL'],
+    'Patient_1': ['FMPA'] #, 'FM', 'CP', 'PAIN', 'CHRONICPAIN'] 
+}
+
 
 # Filter specifications according to the reference paper
 FILTER_HP = 0.5           # High-pass filter cutoff (Hz)
@@ -99,7 +106,7 @@ BANDS = {
 # 5. MACHINE LEARNING & VISUALIZATION METRICS
 # ==============================================================================
 RANDOM_STATE = 42
-TEST_SIZE = 0.20
+TEST_SIZE = 0.2 # paper uses 0.1 
 MIN_AGE = 18.0
 
 

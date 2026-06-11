@@ -6,7 +6,7 @@ Overview:
     This script executes the training phase of the machine learning pipeline
     across ALL 5 frequency bands (delta, theta, alpha, beta, gamma).
     
-    For EACH band, it will:
+    For each band, it will:
         1. Load the 80% training dataset and filter to the Central 9 ROI channels.
         2. Apply StratifiedGroupKFold to group 30s segments by Subject, 
            strictly preventing identity/data leakage during cross-validation.
@@ -16,8 +16,8 @@ Overview:
         6. Perform a 1000-iteration permutation test to validate statistical significance.
         7. Save the trained model, scaler, and feature list as a frozen '.pkl' artifact.
         
-    ⚠️ This script strictly isolates the learning process and NEVER touches 
-       the 20% unseen test set.
+    This script strictly isolates the learning process and does not use the 
+    the 20% unseen test set.
 
 Execution:
     python train_svm.py
@@ -34,13 +34,22 @@ from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedGroupKFold, permutation_test_score, GridSearchCV
 from mlxtend.feature_selection import SequentialFeatureSelector as SFS
+from mlxtend.plotting import plot_sequential_feature_selection as plot_sfs
+import matplotlib.pyplot as plt
 
 # ==========================================
-# 0. CONFIG IMPORT
+# 0. CONFIG IMPORT & ABLATION SWITCH
 # ==========================================
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import RESULTS_DIR, RANDOM_STATE
+
+# ---------------------------------------------------------
+# THE ABLATION SWITCH
+# True  = Benchmark mode (9 Central Channels - prevents EMG artifacts)
+# False = Exploratory mode (All 19 Channels - tests dimensionality & noise)
+USE_ROI = True
+# ---------------------------------------------------------
 
 # =============================================================================
 # 1. LOAD TRAINING DATA ONLY
@@ -61,29 +70,38 @@ N_PERMUTATIONS = 1000
 
 results_summary = []
 
-print(f"\n⚙️ Starting Training Phase. This will take some time...")
+mode_name = "BENCHMARK (9-Channel ROI)" if USE_ROI else "EXPLORATORY (All 19 Channels)"
+print(f"\n⚙️ Starting Training Phase in {mode_name} mode...")
 
 for band in bands:
     print("\n" + "="*60)
     print(f"🧠 TRAINING BAND: {band.upper()}")
     print("="*60)
     
-    # --- A. FILTERING ---
-    roi_band_features = []
+    # --- A. FILTERING (Ablation Logic) ---
+    selected_band_features = []
     for col in X_train_full.columns:
         if f'({band})' in col:
             pair = col.replace(f'({band})', '').split('-')
-            if pair[0] in roi_channels and pair[1] in roi_channels:
-                roi_band_features.append(col)
+            
+            if USE_ROI:
+                # Keep only pairs where BOTH channels are in the 9-channel ROI
+                if pair[0] in roi_channels and pair[1] in roi_channels:
+                    selected_band_features.append(col)
+            else:
+                # Keep ALL pairs for this band
+                selected_band_features.append(col)
 
-    X_train_roi = X_train_full[roi_band_features]
+    X_train_roi = X_train_full[selected_band_features]
+    print(f"-> Feature space size before mSFFS: {X_train_roi.shape[1]} features")
     
     # --- B. SCALING ---
     scaler = StandardScaler()
     X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train_roi), columns=X_train_roi.columns)
 
     # --- C. STRATIFIED GROUP K-FOLD (Prevents Leakage) ---
-    cv_strategy = StratifiedGroupKFold(n_splits=5)
+    cv_strategy = StratifiedGroupKFold(n_splits=5) 
+    # cv_strategy = RepeatedStratifiedGroupKFold(n_splits=10) 
     cv_splits = list(cv_strategy.split(X_train_scaled, y_train, groups=groups_train))
 
     # --- D. FEATURE SELECTION (mSFFS) ---
@@ -103,6 +121,18 @@ for band in bands:
     sfs = sfs.fit(X_train_scaled, y_train)
     selected_features = list(sfs.k_feature_names_)
     print(f"-> Optimal subset found ({len(selected_features)} features)")
+    
+    fig1 = plot_sfs(sfs.get_metric_dict(), kind='std_dev', figsize=(10, 6))
+    plt.title(f'mSFFS Learning Curve (Subset Accuracy) - {band.upper()} Band')
+    plt.ylabel('CV Accuracy')
+    plt.xlabel('Number of Features')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    curve_path = RESULTS_DIR / f"mSFFS_learning_curve_{band}.png"
+    plt.savefig(curve_path, dpi=300)
+    plt.close()
+    print(f"-> mSFFS Learning curve saved to {curve_path.name}")
+        
 
     X_train_final = X_train_scaled[selected_features]
 
@@ -129,13 +159,16 @@ for band in bands:
     print(f"-> Permutation p-value: {pvalue:.4f}")
 
     # --- G. SAVE ARTIFACTS TO .PKL ---
+    # Add a prefix to the filename if exploratory mode is used, so you don't overwrite benchmark models
+    prefix = "ROI_" if USE_ROI else "ALL_"
     model_artifact = {
         'model': final_svm,
         'scaler': scaler,
-        'roi_features': roi_band_features,
-        'selected_features': selected_features
+        'roi_features': selected_band_features,
+        'selected_features': selected_features,
+        'mode': mode_name
     }
-    model_path = RESULTS_DIR / f"saved_model_{band}.pkl"
+    model_path = RESULTS_DIR / f"saved_model_{prefix}{band}.pkl"
     joblib.dump(model_artifact, model_path)
     print(f"-> Model saved successfully to {model_path.name}")
 
@@ -151,7 +184,7 @@ for band in bands:
 
 # --- H. SUMMARY REPORT ---
 print("\n" + "*"*80)
-print("🏆 TRAINING PHASE COMPLETED (Models saved to disk)")
+print(f"🏆 TRAINING PHASE COMPLETED - {mode_name}")
 summary_df = pd.DataFrame(results_summary).sort_values(by='Internal_CV_Accuracy', ascending=False)
 print(summary_df[['Band', 'Internal_CV_Accuracy', 'P_Value', 'Num_Features']].to_string(index=False))
 print("*"*80)
