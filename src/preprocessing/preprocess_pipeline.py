@@ -189,6 +189,9 @@ def extract_connectivity_features(epochs, subject_id, condition, segment_idx):
             fmin=fmin, 
             fmax=fmax, 
             faverage=True,
+            # mt_bandwidth=config.MT_BANDWIDTH,  # <-- De nieuwe parameter
+            # mt_adaptive=False,                 # Zorgt voor gelijke weging van tapers
+            # mt_low_bias=True,                  # Behoudt alleen tapers met goede concentratie
             verbose=False
         )
         
@@ -292,10 +295,14 @@ def process_subject(file_path, output_dir, dataset_name):
         df_features = pd.concat(all_features, ignore_index=True)
         df_features.to_csv(csv_check, index=False)
 
+
+        # combines the data before saving
+        combined_data = np.vstack(all_epochs_data)
+        
         # 7. REPORTING
         try:
             # Gebruik de legitieme 'epochs'-variabele van het laatste 30s segment.
-            # Dit voorkomt spectrale transiënten door hstack-bewerkingen!
+            # Dit voorkomt spectrale transiënten door hstack-bewerkingen
             fig_after = get_plots(raw_seg, step=f"2. Preprocessed Segment (Last 30s)", scalings={'eeg': 40e-6}, channel_idx=[9])
         except Exception as plot_err: 
             print(f"⚠️ Quality Control Plot na preprocessing mislukt: {plot_err}")
@@ -356,16 +363,21 @@ if __name__ == "__main__":
         for f in found:
             f_lower = f.lower()
             
-            # skip output folders
+            # Sla output folders over
             if 'clean' in f_lower or 'results' in f_lower:
                 continue
-            
-            # label via config.py
+                
             filename = os.path.basename(f)
+            
+            # --- FIX: Sla NCCP proefpersonen expliciet over ---
+            if 'nccp' in filename.lower():
+                continue
+            
+            # Check enkel of we het label kunnen bepalen via config.py
             if assign_label_from_filename(filename):
                 valid_found.append(f)
             
-        print(f"   -> Bestanden over na filteren (valide labels): {len(valid_found)}")
+        print(f"   -> Bestanden over na filteren (valide labels & zonder NCCP): {len(valid_found)}")
         
         # Nu we alleen de juiste bestanden over hebben, pakken we er random 1 (of meer)
         if NUM_SUBJECTS_TO_PROCESS is not None and len(valid_found) > 0:

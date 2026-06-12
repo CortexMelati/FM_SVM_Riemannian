@@ -43,6 +43,7 @@ import matplotlib.pyplot as plt
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import RESULTS_DIR, RANDOM_STATE
+from config import PROCESSED_DATA_DIR, FIGURES_DIR
 
 # ---------------------------------------------------------
 # THE ABLATION SWITCH
@@ -55,7 +56,7 @@ USE_ROI = True
 # 1. LOAD TRAINING DATA ONLY
 # =============================================================================
 print("🚀 Loading Training Dataset...")
-train_path = RESULTS_DIR / "final_dataset_train.csv"
+train_path = PROCESSED_DATA_DIR / "final_dataset_train.csv"
 train_df = pd.read_csv(train_path)
 
 y_train = train_df['Target'].values
@@ -113,7 +114,7 @@ for band in bands:
         k_features=(1, 20),    
         forward=True,          
         floating=True,         
-        scoring='accuracy',
+        scoring='accuracy', # or 'roc_auc'
         cv=cv_splits,          
         n_jobs=-1              
     )
@@ -128,7 +129,7 @@ for band in bands:
     plt.xlabel('Number of Features')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    curve_path = RESULTS_DIR / f"mSFFS_learning_curve_{band}.png"
+    curve_path = FIGURES_DIR / f"mSFFS_learning_curve_{band}.png"
     plt.savefig(curve_path, dpi=300)
     plt.close()
     print(f"-> mSFFS Learning curve saved to {curve_path.name}")
@@ -168,7 +169,7 @@ for band in bands:
         'selected_features': selected_features,
         'mode': mode_name
     }
-    model_path = RESULTS_DIR / f"saved_model_{prefix}{band}.pkl"
+    model_path = PROCESSED_DATA_DIR / f"saved_model_{prefix}{band}.pkl"
     joblib.dump(model_artifact, model_path)
     print(f"-> Model saved successfully to {model_path.name}")
 

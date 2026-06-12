@@ -36,9 +36,14 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_a
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import RESULTS_DIR
+from config import PROCESSED_DATA_DIR, FIGURES_DIR
+
+# Ablation Switch
+USE_ROI = True  
+
 
 print("🔓 Opening the Vault: Loading Unseen Test Data...")
-test_path = RESULTS_DIR / "final_dataset_test.csv"
+test_path = PROCESSED_DATA_DIR / "final_dataset_test.csv"
 test_df = pd.read_csv(test_path)
 
 y_test = test_df['Target'].values
@@ -72,7 +77,7 @@ def expected_calibration_error(y_true, y_prob, n_bins=10):
 for band in bands:
     # 1. FIX: Gebruik de juiste prefix gebaseerd op de Ablation Switch
     prefix = "ROI_" if USE_ROI else "ALL_"
-    model_path = RESULTS_DIR / f"saved_model_{prefix}{band}.pkl"
+    model_path = PROCESSED_DATA_DIR / f"saved_model_{prefix}{band}.pkl"
     
     if not model_path.exists():
         print(f"Waarschuwing: Model for {band} ({prefix}) not found. Skipping...")
@@ -141,7 +146,7 @@ for band in bands:
     plt.title(f't-SNE Data Distribution (mSFFS Features) - {band.upper()}')
     plt.legend(title='Class', labels=['HC (0)', 'FM (1)'])
     plt.tight_layout()
-    tsne_path = RESULTS_DIR / f"tsne_distribution_{prefix}{band}.png"
+    tsne_path = FIGURES_DIR / f"tsne_plot_{prefix}{band}.png"
     plt.savefig(tsne_path, dpi=300)
     plt.close()
 

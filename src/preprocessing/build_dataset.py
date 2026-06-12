@@ -33,14 +33,14 @@ from pathlib import Path
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 
-from config import RESULTS_DIR, LABEL_MAPPING, TEST_SIZE, RANDOM_STATE
+from config import RESULTS_DIR, LABEL_MAPPING, TEST_SIZE, RANDOM_STATE, PROCESSED_DATA_DIR
 
 # =============================================================================
 # 1. AGGREGATE INDIVIDUAL FILES & LABELING
 # =============================================================================
 print("🚀 Starting Dataset Aggregation...")
 
-search_path = RESULTS_DIR / "CP_FM"
+search_path = RESULTS_DIR 
 file_pattern = os.path.join(search_path, "**", "*_features.csv")
 feature_files = glob.glob(file_pattern, recursive=True)
 
@@ -68,6 +68,7 @@ def assign_label(subject_id):
                 return int(label_key.split('_')[1])
     return None
 
+master_df = master_df.copy()
 master_df['Target'] = master_df['Subject'].apply(assign_label)
 master_df = master_df.dropna(subset=['Target'])
 master_df['Target'] = master_df['Target'].astype(int)
@@ -139,14 +140,15 @@ test_df_final = pd.concat(sampled_test_data).sample(frac=1, random_state=RANDOM_
 # =============================================================================
 # 4. SAVE FINAL DATASETS
 # =============================================================================
-train_path = RESULTS_DIR / "final_dataset_train.csv"
-test_path = RESULTS_DIR / "final_dataset_test.csv"
+train_path = PROCESSED_DATA_DIR / "final_dataset_train.csv"
+test_path = PROCESSED_DATA_DIR / "final_dataset_test.csv"
 
+# Gebruik exact de namen zoals ze in sectie 3 zijn aangemaakt!
 train_df.to_csv(train_path, index=False)
 test_df_final.to_csv(test_path, index=False)
 
 print("\n" + "="*50)
-print("✅ DATASET CREATION SUCCESSFUL (Li et al. Methodology Aligned)")
+print("✅ DATASET CREATION SUCCESSFUL (Methodology Aligned)")
 print("="*50)
 print(f"Train set saved: {train_path}")
 print(f"   -> Rows: {len(train_df)} (Balanced sampling 5:4 applied)")

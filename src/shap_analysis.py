@@ -30,13 +30,14 @@ import joblib
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import RESULTS_DIR
+from config import PROCESSED_DATA_DIR, FIGURES_DIR
 
 def run_shap_analysis(target_band='gamma', use_roi=True):
     print(f"🚀 Starting SHAP Analysis for the {target_band.upper()} band...")
     
     # 1. Load the frozen model artifact
     prefix = "ROI_" if use_roi else "ALL_"
-    model_path = RESULTS_DIR / f"saved_model_{prefix}{target_band}.pkl"
+    model_path = PROCESSED_DATA_DIR / f"saved_model_{prefix}{target_band}.pkl"
     
     if not model_path.exists():
         raise FileNotFoundError(f"🚨 Model {model_path.name} niet gevonden. Run train_svm.py eerst.")
@@ -50,7 +51,7 @@ def run_shap_analysis(target_band='gamma', use_roi=True):
     print(f"  ✓ Model geladen met {len(selected_features)} mSFFS geselecteerde features.")
 
     # 2. Load the test dataset (SHAP is evaluated on the unseen data)
-    test_path = RESULTS_DIR / "final_dataset_test.csv"
+    test_path = PROCESSED_DATA_DIR / "final_dataset_test.csv"
     test_df = pd.read_csv(test_path)
     
     # Filter and scale exactly like in the test script
@@ -79,7 +80,7 @@ def run_shap_analysis(target_band='gamma', use_roi=True):
     shap.summary_plot(shap_values_fm, X_test_final, plot_type="bar", show=False)
     plt.title(f"{target_band.upper()} Band - Mean Absolute SHAP Values (Feature Importance)")
     plt.tight_layout()
-    plt.savefig(RESULTS_DIR / f"SHAP_bar_plot_{target_band}.png", dpi=300, bbox_inches='tight')
+    plt.savefig(FIGURES_DIR / f"SHAP_bar_plot_{target_band}.png", dpi=300, bbox_inches='tight')
     plt.close()
 
     # B. Summary Bee Swarm Plot - Replicates Fig 6B
@@ -87,50 +88,10 @@ def run_shap_analysis(target_band='gamma', use_roi=True):
     shap.summary_plot(shap_values_fm, X_test_final, show=False)
     plt.title(f"{target_band.upper()} Band - SHAP Values Summary")
     plt.tight_layout()
-    plt.savefig(RESULTS_DIR / f"SHAP_summary_plot_{target_band}.png", dpi=300, bbox_inches='tight')
+    plt.savefig(FIGURES_DIR / f"SHAP_summary_plot_{target_band}.png", dpi=300, bbox_inches='tight')
     plt.close()
 
     print(f"✅ SHAP-analyse compleet. Plots opgeslagen in {RESULTS_DIR.name}/")
-
-    # 5. Topographical Brain Network (Figuur 4)
-    print("  🧠 Genereren van Topografisch Hersennetwerk...")
-    
-    # 1. Bereken de mean absolute SHAP value per feature voor lijn-dikte
-    mean_abs_shap = np.abs(shap_values_fm).mean(axis=0)
-    
-    # Normaliseer de dikte voor visualisatie (bijv. max dikte = 6)
-    max_shap = mean_abs_shap.max() if mean_abs_shap.max() > 0 else 1
-    line_widths = (mean_abs_shap / max_shap) * 6 
-
-    # 2. Creëer een MNE Info object voor de kanaallocaties
-    montage = mne.channels.make_standard_montage('standard_1020')
-    info = mne.create_info(ch_names=montage.ch_names, sfreq=250, ch_types='eeg')
-    info.set_montage(montage)
-    
-    # Verkrijg de 2D x/y coördinaten voor de plot
-    pos_2d = np.array([info['chs'][i]['loc'][:2] for i in range(len(info['ch_names']))])
-    ch_dict = {ch: pos_2d[i] for i, ch in enumerate(info['ch_names'])}
-
-    # 3. Plot de base scalp map
-    fig, ax = plt.subplots(figsize=(8, 8))
-    mne.viz.plot_sensors(info, show_names=True, axes=ax, kind='topomap', show=False)
-
-    # 4. Trek de connectiviteitslijnen
-    for feature, width in zip(selected_features, line_widths):
-        # Feature ziet eruit als "Fz-Cz_gamma", strip het band-gedeelte
-        ch1, ch2 = feature.split('_')[0].split('-')
-        
-        # Weergegeven in groen-tot-rood colormap afhankelijk van sterkte kan ook, hier simpel rood
-        if ch1 in ch_dict and ch2 in ch_dict:
-            x_coords = [ch_dict[ch1][0], ch_dict[ch2][0]]
-            y_coords = [ch_dict[ch1][1], ch_dict[ch2][1]]
-            ax.plot(x_coords, y_coords, color='#d62728', linewidth=width, alpha=0.8)
-
-    plt.title(f"Connectivity Network (Weighted by SHAP Impact) - {target_band.upper()}")
-    plt.tight_layout()
-    plt.savefig(RESULTS_DIR / f"topographical_network_{target_band}.png", dpi=300)
-    plt.close()
-
 
 
 if __name__ == "__main__":

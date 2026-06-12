@@ -1,6 +1,8 @@
 """
 Central Configuration for Thesis EEG Pipeline.
 Aligned with the methodology of Li et al. (2026).
+
+config.py
 """
 
 import os
@@ -25,17 +27,17 @@ TDBRAIN_DIR = DATA_ROOT / "TDBRAIN-dataset"    # TDBRAIN dataset
 CHRONIC_PAIN_DIR = DATA_ROOT / "Chronicpainset" # Chronic Pain dataset
 # NOT_USABLE_DIR = DATA_ROOT / "OSF_mj9xr_notusable" # Ignored by the pipeline
 
+ACTIVE_DATASET_NAME = CP_FM_DIR.name
 
-# Output Directories (binnen FM_SVM_RIEMANNIAN/results)
-RESULTS_DIR = PROJECT_ROOT / "results"
+# Output Directories (dynamisch gerouteerd per dataset)
+RESULTS_DIR = PROJECT_ROOT / "results" / ACTIVE_DATASET_NAME
 FIGURES_DIR = RESULTS_DIR / "figures"
-PROCESSED_DATA_DIR = RESULTS_DIR / "processed_data"
+PROCESSED_DATA_DIR = RESULTS_DIR / "processed_data" 
 
 # Ensure output directories exist
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
-
 # ==========================================
 # 2. PREPROCESSING & TIMING PARAMETERS (Li et al., 2026)
 # ==========================================
@@ -50,7 +52,7 @@ SFREQ_MAP = {
 # Substrings in filenames used to automatically assign target labels 
 # (0 = Healthy Control, 1 = Patient/Chronic Pain/Fibromyalgia)
 LABEL_MAPPING = {
-    'Healthy_0': ['FMHC'], #, 'HC', 'HEALTHY', 'CONTROL'],
+    'Healthy_0': ['FMHC'], # 'HC', 'HEALTHY', 'CONTROL'],
     'Patient_1': ['FMPA'] #, 'FM', 'CP', 'PAIN', 'CHRONICPAIN'] 
 }
 
@@ -102,6 +104,10 @@ BANDS = {
     'Gamma': (30, 40)     # capped at 40 as stated in the paper from li et al. 
 }
 
+# Multitaper resolutie voor experimentele doeleinden
+MT_BANDWIDTH = 4.0 # 4 = standard, 2 = more precise (more noise), 
+                    # 8  = smoother (less resolution)
+
 # ==============================================================================
 # 5. MACHINE LEARNING & VISUALIZATION METRICS
 # ==============================================================================
@@ -148,14 +154,3 @@ if __name__ == "__main__":
     else:
         print(f"   -> ⚠️ final_dataset.csv not yet generated in the results folder.")
         
-        
-# ==============================================================================
-# 6. CLASS LABELING / NAMING CONVENTIONS
-# ==============================================================================
-# Substrings in filenames used to automatically assign target labels 
-# (0 = Healthy Control, 1 = Chronic Pain / Fibromyalgia)
-
-LABEL_MAPPING = {
-    'Healthy_0': ['FMHC', 'HC', 'HEALTHY'],
-    'Patient_1': ['FMPA', 'FM'] 
-}
