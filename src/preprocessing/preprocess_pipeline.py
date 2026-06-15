@@ -170,13 +170,12 @@ def load_raw_data(filepath):
 def extract_connectivity_features(epochs, subject_id, condition, segment_idx):
     """
     Computes Spectral Connectivity (Coherence) using the method from Li et al. (2026).
-    Returns a dataframe containing 855 features (171 pairs * 5 bands) for ONE 30s segment.
+    Returns a dataframe containing 855 features (171 pairs * 5 bands) for one 30s segment.
     """
     band_names = list(FREQ_BANDS.keys())
     ch_names = epochs.ch_names
     n_channels = len(ch_names)
     
-    # NIEUW: We voegen 'Segment' toe aan de metadata
     features = {'Subject': subject_id, 'Condition': condition, 'Segment': segment_idx}
     
     for band_name in band_names:

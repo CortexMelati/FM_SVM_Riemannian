@@ -26,43 +26,49 @@ sys.path.append(str(current_dir.parent))
 from config import PROCESSED_DATA_DIR, FIGURES_DIR, CHANNELS_1020, BANDS
 
 def plot_roc_curves():
-    """Genereert een gecombineerde ROC curve plot voor TS-SVM over alle banden."""
-    print("🎨 Genereren van ROC Curves...")
+    """Generates a combined ROC curve plot using distinct colors and line styles for publication."""
+    print("🎨 Generating publication-ready ROC Curves...")
     
     plot_data_path = PROCESSED_DATA_DIR / "riemann_plot_data.pkl"
     if not plot_data_path.exists():
-        raise FileNotFoundError("🚨 riemann_plot_data.pkl ontbreekt. Draai script 2.")
+        raise FileNotFoundError("🚨 riemann_plot_data.pkl missing. Run script 2.")
         
     plot_data = joblib.load(plot_data_path)
     roc_data = plot_data['roc']
 
     plt.figure(figsize=(8, 6))
     
-    # Kleuren per band voor visueel onderscheid
-    kleuren = {'DELTA': '#1f77b4', 'THETA': '#ff7f0e', 'ALPHA': '#2ca02c', 
-               'BETA': '#d62728', 'GAMMA': '#9467bd'}
+    # Map each band to a unique combination of color and line style
+    styles = {
+        'DELTA':  {'color': '#1f77b4', 'linestyle': '-'},
+        'THETA':  {'color': '#ff7f0e', 'linestyle': '--'},
+        'ALPHA':  {'color': '#2ca02c', 'linestyle': '-.'},
+        'BETA':   {'color': '#d62728', 'linestyle': ':'},
+        'GAMMA':  {'color': '#9467bd', 'linestyle': (0, (3, 5, 1, 5))} # dashdotted
+    }
     
-    # Plot alleen de TS-SVM modellen om de grafiek leesbaar te houden
     for run_name, data in roc_data.items():
         if 'TS-SVM' in run_name:
             band = run_name.split(' | ')[1]
-            plt.plot(data['fpr'], data['tpr'], lw=2, color=kleuren.get(band, '#000'), 
+            cfg = styles.get(band, {'color': '#000', 'linestyle': '-'})
+            plt.plot(data['fpr'], data['tpr'], lw=2.5, 
+                     color=cfg['color'], linestyle=cfg['linestyle'],
                      label=f"{band} (AUC = {data['auc']:.3f})")
     
-    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    plt.plot([0, 1], [0, 1], color='gray', lw=1.5, linestyle='--')
     plt.xlim([0.0, 1.0])
     plt.ylim([0.0, 1.05])
     plt.xlabel('False Positive Rate', fontsize=12)
     plt.ylabel('True Positive Rate', fontsize=12)
-    plt.title("ROC Curves - Tangent Space SVM per Frequentieband", fontsize=14, pad=15)
+    plt.title("ROC Curves - Tangent Space SVM per Frequency Band", fontsize=14, pad=15)
     plt.legend(loc="lower right", fontsize=10)
-    plt.grid(alpha=0.3)
+    plt.grid(True, alpha=0.2)
     plt.tight_layout()
     
     save_path = FIGURES_DIR / "riemann_multiband_roc.png"
     plt.savefig(save_path, dpi=300)
     plt.close()
-    print(f"  ✓ Opgeslagen: {save_path.name}")
+    print(f"  ✓ Publication-ready plot saved to: {save_path.name}")
 
 def plot_topographical_weights(target_band='BETA'):
     """Vertaalt TS-SVM weights naar kanaalparen en plot de topografische kaart."""
