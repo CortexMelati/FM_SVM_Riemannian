@@ -110,7 +110,7 @@ for subject, group in train_full_df.groupby('Subject'):
     target = group['Target'].iloc[0]
     
     if target == 1:
-        # Fibromyalgia: we willen exact 5 segmenten
+        # Fibromyalgia: we willen exact 5 segmenten ** nog een automatische berekening in zetten. 
         if len(group) >= 5:
             sampled_train_data.append(group.sample(n=5, random_state=RANDOM_STATE))
         else:
