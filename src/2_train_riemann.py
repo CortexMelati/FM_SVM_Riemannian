@@ -1,12 +1,14 @@
 """
 =============================================================================
-2. TRAIN RIEMANN (MULTI-BAND EXPERIMENT)
+2. TRAIN RIEMANN (MULTI-BAND & DUAL-LAYOUT EXPERIMENT)
 =============================================================================
 Overview:
-    Traing TS-SVM en MDM op de covariantiematrices van ALLE frequentiebanden
-    (Delta, Theta, Alpha, Beta, Gamma) via Stratified Group K-Fold CV.
+    Trains TS-SVM and MDM on the covariance matrices of ALL frequency bands
+    (Delta, Theta, Alpha, Beta, Gamma) and BOTH spatial layouts (Whole vs ROI)
+    via Stratified Group K-Fold CV.
     
-python 2_train_riemann.py
+Execution:
+    python 2_train_riemann.py
 =============================================================================
 """
 
@@ -18,7 +20,7 @@ import joblib
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import PROCESSED_DATA_DIR, RANDOM_STATE, BANDS
+from config import PROCESSED_DATA_DIR, RANDOM_STATE, BANDS, RIEMANN_DATA_DIR
 
 from pyriemann.tangentspace import TangentSpace
 from pyriemann.classification import MDM
@@ -29,10 +31,10 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import recall_score, roc_curve, auc, confusion_matrix
 
 def train_models():
-    print("🚀 START STAP 2: MULTI-BAND MODEL TRAINING (TS-SVM vs MDM)")
+    print("🚀 STARTING STEP 2: MULTI-BAND & DUAL-LAYOUT MODEL TRAINING (TS-SVM vs MDM)")
     
-    y = np.load(PROCESSED_DATA_DIR / "y_train_riemann.npy")
-    groups = np.load(PROCESSED_DATA_DIR / "groups_train_riemann.npy")
+    y = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
+    groups = np.load(RIEMANN_DATA_DIR / "groups_train_riemann.npy")
 
     pipelines = {
         'TS-SVM': Pipeline([
@@ -54,55 +56,57 @@ def train_models():
     results = []
     plot_data = {'roc': {}, 'cm': {}}
 
-    # LOOP OVER DE OPGESLAGEN BANDEN
+    # LOOP OVER SAVED BANDS
     for band_name in BANDS.keys():
-        print(f"\n📡 FREQUENTIEBAND: {band_name.upper()}")
-        
-        # Laad specifieke covarianties
-        X_covs = np.load(PROCESSED_DATA_DIR / f"covs_train_{band_name}.npy")
-        
-        for p_name, pipe in pipelines.items():
-            run_name = f"{p_name} | {band_name}"
-            print(f"  ⚙️ Trainen: {p_name}...")
+        # NEW: LOOP OVER BOTH SPATIAL LAYOUTS
+        for layout in ['whole', 'roi']:
+            print(f"\n📡 FREQUENCY BAND: {band_name.upper()} | LAYOUT: {layout.upper()}")
             
-            y_true, y_pred, y_prob = [], [], []
+            # Load specific covariances for this band and layout
+            X_covs = np.load(RIEMANN_DATA_DIR / f"covs_train_{band_name}_{layout}.npy")
             
-            for train_idx, val_idx in cv.split(X_covs, y, groups):
-                pipe.fit(X_covs[train_idx], y[train_idx])
-                y_pred.extend(pipe.predict(X_covs[val_idx]))
+            for p_name, pipe in pipelines.items():
+                run_name = f"{p_name} | {band_name} | {layout}"
+                print(f"  ⚙️ Training: {p_name}...")
                 
-                prob = pipe.predict_proba(X_covs[val_idx])[:, 1] if hasattr(pipe, "predict_proba") else pipe.predict(X_covs[val_idx])
-                y_prob.extend(prob)
-                y_true.extend(y[val_idx])
+                y_true, y_pred, y_prob = [], [], []
+                
+                for train_idx, val_idx in cv.split(X_covs, y, groups):
+                    pipe.fit(X_covs[train_idx], y[train_idx])
+                    y_pred.extend(pipe.predict(X_covs[val_idx]))
+                    
+                    prob = pipe.predict_proba(X_covs[val_idx])[:, 1] if hasattr(pipe, "predict_proba") else pipe.predict(X_covs[val_idx])
+                    y_prob.extend(prob)
+                    y_true.extend(y[val_idx])
 
-            y_true, y_pred, y_prob = np.array(y_true), np.array(y_pred), np.array(y_prob)
+                y_true, y_pred, y_prob = np.array(y_true), np.array(y_pred), np.array(y_prob)
 
-            sens = recall_score(y_true, y_pred, pos_label=1)
-            spec = recall_score(y_true, y_pred, pos_label=0)
-            bal_acc = (sens + spec) / 2
-            fpr, tpr, _ = roc_curve(y_true, y_prob)
-            roc_auc = auc(fpr, tpr)
-            
-            results.append({
-                'Band': band_name, 'Model': p_name, 'Bal_Acc': bal_acc, 
-                'Sens (Pain)': sens, 'Spec (HC)': spec, 'ROC_AUC': roc_auc
-            })
-            
-            plot_data['roc'][run_name] = {'fpr': fpr, 'tpr': tpr, 'auc': roc_auc}
-            plot_data['cm'][run_name] = confusion_matrix(y_true, y_pred)
+                sens = recall_score(y_true, y_pred, pos_label=1)
+                spec = recall_score(y_true, y_pred, pos_label=0)
+                bal_acc = (sens + spec) / 2
+                fpr, tpr, _ = roc_curve(y_true, y_prob)
+                roc_auc = auc(fpr, tpr)
+                
+                results.append({
+                    'Band': band_name, 'Layout': layout, 'Model': p_name, 'Bal_Acc': bal_acc, 
+                    'Sens (Pain)': sens, 'Spec (HC)': spec, 'ROC_AUC': roc_auc
+                })
+                
+                plot_data['roc'][run_name] = {'fpr': fpr, 'tpr': tpr, 'auc': roc_auc}
+                plot_data['cm'][run_name] = confusion_matrix(y_true, y_pred)
 
-            print(f"     -> Bal. Acc: {bal_acc:.2%} | AUC: {roc_auc:.3f}")
+                print(f"     -> Bal. Acc: {bal_acc:.2%} | AUC: {roc_auc:.3f}")
 
-            # Sla definitief model op (HIER ZITTEN DE SVM WEIGHTS IN!)
-            pipe.fit(X_covs, y)
-            joblib.dump(pipe, PROCESSED_DATA_DIR / f"model_riemann_{band_name}_{p_name.replace('-','')}.pkl")
+                # Save definitive model (THIS CONTAINS THE SVM WEIGHTS!)
+                pipe.fit(X_covs, y)
+                joblib.dump(pipe, PROCESSED_DATA_DIR / f"model_riemann_{band_name}_{layout}_{p_name.replace('-','')}.pkl")
 
-    # Resultaten opslaan
+    # Save results
     df_results = pd.DataFrame(results)
-    df_results.to_csv(PROCESSED_DATA_DIR / "riemann_multiband_results.csv", index=False)
-    joblib.dump(plot_data, PROCESSED_DATA_DIR / "riemann_plot_data.pkl")
+    df_results.to_csv(RIEMANN_DATA_DIR / "riemann_multiband_layout_results.csv", index=False)
+    joblib.dump(plot_data, RIEMANN_DATA_DIR / "riemann_plot_data.pkl")
     
-    print("\n✅ Training voltooid! Alle banden zijn verwerkt.")
+    print("\n✅ Training complete! All bands and layouts processed.")
 
 if __name__ == "__main__":
     train_models()

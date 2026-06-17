@@ -34,10 +34,24 @@ RESULTS_DIR = PROJECT_ROOT / "results" / ACTIVE_DATASET_NAME
 FIGURES_DIR = RESULTS_DIR / "figures"
 PROCESSED_DATA_DIR = RESULTS_DIR / "processed_data" 
 
+# riemannian model info
+RIEMANN_DATA_DIR = PROCESSED_DATA_DIR / "riemann_data"
+RIEMANN_FIGURES_DIR = FIGURES_DIR / "riemann_figures"
+
+# SVM model info
+SVM_DATA_DIR = PROCESSED_DATA_DIR / "svm_data"
+SVM_FIGURES_DIR = FIGURES_DIR / "svm_figures"
+
+
+
 # Ensure output directories exist
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+RIEMANN_DATA_DIR.mkdir(parents=True, exist_ok=True)
+RIEMANN_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+SVM_DATA_DIR.mkdir(parents=True, exist_ok=True)
+SVM_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 # ==========================================
 # 2. PREPROCESSING & TIMING PARAMETERS (Li et al., 2026)
 # ==========================================

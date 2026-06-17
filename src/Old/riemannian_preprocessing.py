@@ -13,7 +13,7 @@ import re
 import mne
 import numpy as np
 import pandas as pd
-from preprocessing.Old.preprocessing_plotting_old import get_plots
+from Old.preprocessing_plotting_old import get_plots
 import matplotlib.pyplot as plt
 import logging
 import warnings

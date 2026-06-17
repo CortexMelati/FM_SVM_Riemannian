@@ -23,13 +23,13 @@ import sys
 # Configuratie laden
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import PROCESSED_DATA_DIR, FIGURES_DIR, CHANNELS_1020, BANDS
+from config import PROCESSED_DATA_DIR, FIGURES_DIR, CHANNELS_1020, BANDS, RIEMANN_FIGURES_DIR
 
 def plot_roc_curves():
     """Generates a combined ROC curve plot using distinct colors and line styles for publication."""
     print("🎨 Generating publication-ready ROC Curves...")
     
-    plot_data_path = PROCESSED_DATA_DIR / "riemann_plot_data.pkl"
+    plot_data_path = RIEMANN_DATA_DIR / "riemann_plot_data.pkl"
     if not plot_data_path.exists():
         raise FileNotFoundError("🚨 riemann_plot_data.pkl missing. Run script 2.")
         
@@ -65,7 +65,7 @@ def plot_roc_curves():
     plt.grid(True, alpha=0.2)
     plt.tight_layout()
     
-    save_path = FIGURES_DIR / "riemann_multiband_roc.png"
+    save_path = RIEMANN_FIGURES_DIR / "riemann_multiband_roc.png"
     plt.savefig(save_path, dpi=300)
     plt.close()
     print(f"  ✓ Publication-ready plot saved to: {save_path.name}")
@@ -75,7 +75,7 @@ def plot_topographical_weights(target_band='BETA'):
     print(f"\n🧠 Genereren van Topografisch Netwerk voor TS-SVM ({target_band})...")
     
     # 1. Laad het getrainde model
-    model_path = PROCESSED_DATA_DIR / f"model_riemann_{target_band}_TSSVM.pkl"
+    model_path = RIEMANN_DATA_DIR / f"model_riemann_{target_band}_TSSVM.pkl"
     if not model_path.exists():
         print(f"  ⚠️ Model {model_path.name} niet gevonden. Kan hersenkaart niet genereren.")
         return
@@ -150,7 +150,7 @@ def plot_topographical_weights(target_band='BETA'):
     ax.set_title(f"Sterkste Riemannian Connecties\n(TS-SVM - {target_band.upper()} Band)", fontsize=14, pad=20)
     plt.tight_layout()
     
-    save_path = FIGURES_DIR / f"riemann_topography_{target_band.lower()}.png"
+    save_path = RIEMANN_FIGURES_DIR / f"riemann_topography_{target_band.lower()}.png"
     plt.savefig(save_path, dpi=300)
     plt.close()
     print(f"  ✓ Opgeslagen: {save_path.name}")

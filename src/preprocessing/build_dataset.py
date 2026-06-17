@@ -4,16 +4,16 @@ DATASET AGGREGATION & TRAIN/TEST SPLIT (Li et al., 2026 Methodology)
 =============================================================================
 Overview:
     This script aggregates individual patient feature files (*_features.csv)
-    into a single master dataset and handles the class imbalance exactly as 
-    described by Li et al. (2026).
+    into a single master dataset and handles the class imbalance via an 
+    automated data-density calculation to ensure a ~1:1 class distribution.
     
     Key Steps:
-        1. Aggregation & Labeling (0 = fmhc, 1 = fmpa)
+        1. Aggregation & Labeling (0 = hc, 1 = patient)
         2. Subject-Level Split: Stratified 80/20 split based on unique subjects
            to prevent data leakage.
-        3. Segment Sampling: Balances the training set by using 5 segments 
-           for Fibromyalgia patients and 4 segments for Healthy Controls.
-           (Note: Requires preprocessing pipeline to output multiple segments).
+        3. Automated Segment Sampling: Dynamically calculates the optimal 
+           number of segments per Healthy Control to match the total volume
+           of patient segments.
 
 Execution:
     python build_dataset.py
@@ -45,7 +45,7 @@ file_pattern = os.path.join(search_path, "**", "*_features.csv")
 feature_files = glob.glob(file_pattern, recursive=True)
 
 if not feature_files:
-    print(f"❌ Geen *_features.csv bestanden gevonden in {search_path}.")
+    print(f"❌ No *_features.csv files found in {search_path}.")
     sys.exit()
 
 print(f"📂 Found {len(feature_files)} individual feature files. Merging...")
@@ -56,7 +56,7 @@ for file in feature_files:
         df = pd.read_csv(file)
         all_data.append(df)
     except Exception as e:
-        print(f"⚠️ Fout bij inlezen van {file}: {e}")
+        print(f"⚠️ Error reading {file}: {e}")
 
 master_df = pd.concat(all_data, ignore_index=True)
 
@@ -101,39 +101,61 @@ train_full_df = master_df[master_df['Subject'].isin(train_subs)].copy()
 test_df = master_df[master_df['Subject'].isin(test_subs)].copy()
 
 # =============================================================================
-# 3. SEGMENT SAMPLING FOR BALANCING (Li et al., 2026 Geoptimaliseerd)
+# 3. BIDIRECTIONAL DYNAMIC SEGMENT SAMPLING (Li et al., 2026 Optimized)
 # =============================================================================
+print("\n⚖️ Calculating optimal segment ratio for training set balancing...")
+
+total_patient_segments = len(train_full_df[train_full_df['Target'] == 1])
+total_hc_segments = len(train_full_df[train_full_df['Target'] == 0])
+
 sampled_train_data = []
 
-# Training set balancing: 5 voor FM, 4 voor HC
-for subject, group in train_full_df.groupby('Subject'):
-    target = group['Target'].iloc[0]
+# SCENARIO A: Patients are the minority 
+if total_patient_segments <= total_hc_segments:
+    print("   -> Imbalance detected: Healthy Controls are the majority.")
+    anchor_volume = total_patient_segments
+    majority_subjects = train_full_df[train_full_df['Target'] == 0]['Subject'].nunique()
     
-    if target == 1:
-        # Fibromyalgia: we willen exact 5 segmenten ** nog een automatische berekening in zetten. 
-        if len(group) >= 5:
-            sampled_train_data.append(group.sample(n=5, random_state=RANDOM_STATE))
+    # Calculate how many segments per HC subject we can keep
+    optimal_segments = max(1, round(anchor_volume / majority_subjects)) if majority_subjects > 0 else 5
+    
+    for subject, group in train_full_df.groupby('Subject'):
+        target = group['Target'].iloc[0]
+        if target == 1:
+            n_samples = min(5, len(group)) # Anchor: Take all available minority segments
         else:
-            # Mocht een patiënt minder dan 5 segmenten hebben, neem alles wat er is
-            sampled_train_data.append(group)
-    else:
-        # Healthy Control: we willen exact 4 segmenten (jouw geoptimaliseerde ratio)
-        n_samples = min(4, len(group))
+            n_samples = min(optimal_segments, len(group)) # Buffer: Downsample the majority
+        sampled_train_data.append(group.sample(n=n_samples, random_state=RANDOM_STATE))
+
+# SCENARIO B: Healthy Controls are the minority 
+else:
+    print("   -> Imbalance detected: Patients are the majority.")
+    anchor_volume = total_hc_segments
+    majority_subjects = train_full_df[train_full_df['Target'] == 1]['Subject'].nunique()
+    
+    # Calculate how many segments per Patient subject we can keep
+    optimal_segments = max(1, round(anchor_volume / majority_subjects)) if majority_subjects > 0 else 5
+    
+    for subject, group in train_full_df.groupby('Subject'):
+        target = group['Target'].iloc[0]
+        if target == 0:
+            n_samples = min(5, len(group)) # Anchor: Take all available minority segments
+        else:
+            n_samples = min(optimal_segments, len(group)) # Buffer: Downsample the majority
         sampled_train_data.append(group.sample(n=n_samples, random_state=RANDOM_STATE))
 
 train_df = pd.concat(sampled_train_data).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
 
-# Hold-out testset validatie: Garandeer strict 5 segmenten per subject (Li et al., 2026)
+# Hold-out testset validation remains strictly 5 segments per subject
 sampled_test_data = []
 for subject, group in test_df.groupby('Subject'):
     if len(group) >= 5:
-        # Pak exact de eerste 5 macro-segmenten conform de benchmark-opzet
         sampled_test_data.append(group.sort_values('Segment').head(5))
     else:
-        print(f"⚠️ Subject {subject} uit hold-out set verwijderd: bezit slechts {len(group)}/5 segmenten.")
+        print(f"⚠️ Subject {subject} removed from hold-out set: contains only {len(group)}/5 segments.")
 
 if not sampled_test_data:
-    raise ValueError("🚨 Geen enkel subject in de hold-out testset heeft de vereiste 5 segmenten!")
+    raise ValueError("🚨 No subjects in the hold-out testset meet the 5-segment requirement!")
 
 test_df_final = pd.concat(sampled_test_data).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
 
@@ -143,16 +165,15 @@ test_df_final = pd.concat(sampled_test_data).sample(frac=1, random_state=RANDOM_
 train_path = PROCESSED_DATA_DIR / "final_dataset_train.csv"
 test_path = PROCESSED_DATA_DIR / "final_dataset_test.csv"
 
-# Gebruik exact de namen zoals ze in sectie 3 zijn aangemaakt!
 train_df.to_csv(train_path, index=False)
 test_df_final.to_csv(test_path, index=False)
 
 print("\n" + "="*50)
 print("✅ DATASET CREATION SUCCESSFUL (Methodology Aligned)")
 print("="*50)
-print(f"Train set saved: {train_path}")
-print(f"   -> Rows: {len(train_df)} (Balanced sampling 5:4 applied)")
+print(f"Train set saved: {train_path.name}")
+print(f"   -> Rows: {len(train_df)} (Balanced sampling applied)")
 print(f"   -> Unique Training Subjects: {train_df['Subject'].nunique()}")
-print(f"Test set saved:  {test_path}")
+print(f"Test set saved:  {test_path.name}")
 print(f"   -> Rows: {len(test_df_final)} (Strictly 5 segments per subject)")
 print(f"   -> Unique Test Subjects: {test_df_final['Subject'].nunique()}")

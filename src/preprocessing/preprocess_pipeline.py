@@ -66,7 +66,7 @@ from config import (
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
-    from preprocessing_plotting import get_plots
+    from preprocessing.prep_plot import get_plots
 except ImportError:
     print("⚠️ Warning: 'preprocessing_plotting.py' not found. Plots will be skipped.")
     def get_plots(*args, **kwargs): return None
@@ -199,7 +199,7 @@ def extract_connectivity_features(epochs, subject_id, condition, segment_idx):
         for i in range(n_channels):
             for j in range(i + 1, n_channels):
                 ch_pair = f"{ch_names[i]}-{ch_names[j]}({band_name.lower()})"
-                # LOWER triangle ophalen
+                # LOWER triangle matrix
                 features[ch_pair] = con_dense[j, i, 0]
                 
     return pd.DataFrame([features])
@@ -216,7 +216,7 @@ def process_subject(file_path, output_dir, dataset_name):
     
     subject_id = filename.split('_')[0] 
     
-    # Maak nette submappen aan op basis van de dataset EN de conditie
+    # Maak nette submappen aan op basis van de dataset en de conditie
     sub_folder = os.path.join(dataset_name, subject_group)
     save_dir = os.path.join(output_dir, sub_folder, subject_id)
     os.makedirs(save_dir, exist_ok=True)

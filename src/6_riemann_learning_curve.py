@@ -32,13 +32,13 @@ import joblib
 # ==========================================
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import PROCESSED_DATA_DIR, FIGURES_DIR, RANDOM_STATE, BANDS
+from config import PROCESSED_DATA_DIR, FIGURES_DIR, RANDOM_STATE, BANDS, RIEMANN_FIGURES_DIR, RIEMANN_DATA_DIR
 
 def run_learning_curve_pipeline():
     print("🚀 STARTING STEP 6: LEARNING CURVE DIAGNOSTICS AND AUTOMATED PLOTTING...")
     
-    y_train = np.load(PROCESSED_DATA_DIR / "y_train_riemann.npy")
-    groups_train = np.load(PROCESSED_DATA_DIR / "groups_train_riemann.npy")
+    y_train = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
+    groups_train = np.load(RIEMANN_DATA_DIR / "groups_train_riemann.npy")
     
     data_fractions = [0.2, 0.4, 0.6, 0.8, 1.0]
     cv = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
@@ -47,9 +47,9 @@ def run_learning_curve_pipeline():
 
     # --- PART 1: COMPUTE METRICS ---
     for band_name in BANDS.keys():
-        X_covs = np.load(PROCESSED_DATA_DIR / f"covs_train_{band_name}.npy")
+        X_covs = np.load(RIEMANN_DATA_DIR / f"covs_train_{band_name}.npy")
         
-        model_path = PROCESSED_DATA_DIR / f"model_riemann_{band_name}_TSSVM.pkl"
+        model_path = RIEMANN_DATA_DIR / f"model_riemann_{band_name}_TSSVM.pkl"
         if not model_path.exists(): 
             print(f"  ⚠️ Template model for {band_name} missing. Skipping.")
             continue
@@ -92,7 +92,7 @@ def run_learning_curve_pipeline():
             })
 
     df_curves = pd.DataFrame(curve_records)
-    df_curves.to_csv(PROCESSED_DATA_DIR / "riemann_learning_curves.csv", index=False)
+    df_curves.to_csv(RIEMANN_DATA_DIR / "riemann_learning_curves.csv", index=False)
     print("  ✓ Metric matrices successfully serialized to disk.")
 
     # --- PART 2: AUTOMATED PLOTTING ---
@@ -137,7 +137,7 @@ def run_learning_curve_pipeline():
     plt.tight_layout()
     fig.subplots_adjust(top=0.88)
     
-    chart_path = FIGURES_DIR / "riemann_learning_curves.png"
+    chart_path = RIEMANN_FIGURES_DIR / "riemann_learning_curves.png"
     plt.savefig(chart_path, dpi=300)
     plt.close()
     print(f"✅ Pipeline complete. Line diagnostics chart saved directly to: {chart_path.name}")

@@ -38,15 +38,15 @@ from mlxtend.plotting import plot_sequential_feature_selection as plot_sfs
 import matplotlib.pyplot as plt
 
 # ==========================================
-# 0. CONFIG IMPORT & ABLATION SWITCH
+# 0. CONFIG IMPORT & SWITCH CHANNELS
 # ==========================================
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import RESULTS_DIR, RANDOM_STATE
-from config import PROCESSED_DATA_DIR, FIGURES_DIR
+from config import PROCESSED_DATA_DIR, SVM_DATA_DIR, SVM_FIGURES_DIR
 
 # ---------------------------------------------------------
-# THE ABLATION SWITCH
+# THE SWITCH FOR FOCUS CHANNELS
 # True  = Benchmark mode (9 Central Channels - prevents EMG artifacts)
 # False = Exploratory mode (All 19 Channels - tests dimensionality & noise)
 USE_ROI = True
@@ -97,6 +97,7 @@ for band in bands:
     print(f"-> Feature space size before mSFFS: {X_train_roi.shape[1]} features")
     
     # --- B. SCALING ---
+    # Z-score normalization
     scaler = StandardScaler()
     X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train_roi), columns=X_train_roi.columns)
 
@@ -107,7 +108,9 @@ for band in bands:
 
     # --- D. FEATURE SELECTION (mSFFS) ---
     print("-> Running mSFFS (1 to 20 features)...")
-    base_svm = SVC(kernel='rbf', gamma='scale', random_state=RANDOM_STATE)
+    base_svm = SVC(kernel='rbf', 
+                   gamma='scale', 
+                   random_state=RANDOM_STATE)
     
     sfs = SFS(
         base_svm, 
@@ -129,7 +132,7 @@ for band in bands:
     plt.xlabel('Number of Features')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    curve_path = FIGURES_DIR / f"mSFFS_learning_curve_{band}.png"
+    curve_path = SVM_FIGURES_DIR / f"mSFFS_learning_curve_{band}.png"
     plt.savefig(curve_path, dpi=300)
     plt.close()
     print(f"-> mSFFS Learning curve saved to {curve_path.name}")
@@ -139,11 +142,18 @@ for band in bands:
 
     # --- E. GRID SEARCH ---
     print("-> Running Grid Search for parameters...")
-    param_grid = {'C': [0.1, 1, 10, 100], 'gamma': np.logspace(-4, 1.5, 20)}
+    param_grid = {'C': [0.01, 0.1, 1, 10, 100, 1000],  # select error penalty
+                  'gamma': np.logspace(-4, 1.5, 20),
+                  'class_weight': ['balanced', None]}  
     
     grid_search = GridSearchCV(
-        SVC(kernel='rbf', probability=True, random_state=RANDOM_STATE),
-        param_grid, cv=cv_splits, scoring='accuracy', n_jobs=-1
+        SVC(kernel='rbf', 
+            probability=True, 
+            random_state=RANDOM_STATE),
+        param_grid, 
+        cv=cv_splits, 
+        scoring='accuracy', 
+        n_jobs=-1
     )
     grid_search.fit(X_train_final, y_train)
     final_svm = grid_search.best_estimator_
@@ -154,8 +164,12 @@ for band in bands:
     # --- F. PERMUTATION TEST ---
     print(f"-> Running Permutation Test ({N_PERMUTATIONS} shuffles)...")
     score, permutation_scores, pvalue = permutation_test_score(
-        final_svm, X_train_final, y_train, scoring="accuracy", 
-        cv=cv_splits, n_permutations=N_PERMUTATIONS, n_jobs=-1, random_state=RANDOM_STATE
+        final_svm, X_train_final, y_train, 
+        scoring="accuracy", 
+        cv=cv_splits, 
+        n_permutations=N_PERMUTATIONS, 
+        n_jobs=-1, 
+        random_state=RANDOM_STATE
     )
     print(f"-> Permutation p-value: {pvalue:.4f}")
 
@@ -169,7 +183,7 @@ for band in bands:
         'selected_features': selected_features,
         'mode': mode_name
     }
-    model_path = PROCESSED_DATA_DIR / f"saved_model_{prefix}{band}.pkl"
+    model_path = SVM_DATA_DIR / f"saved_model_{prefix}{band}.pkl"
     joblib.dump(model_artifact, model_path)
     print(f"-> Model saved successfully to {model_path.name}")
 
