@@ -34,7 +34,6 @@ from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedGroupKFold, permutation_test_score, GridSearchCV
 from mlxtend.feature_selection import SequentialFeatureSelector as SFS
-from mlxtend.plotting import plot_sequential_feature_selection as plot_sfs
 import matplotlib.pyplot as plt
 
 # ==========================================
@@ -44,18 +43,55 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import RESULTS_DIR, RANDOM_STATE
 from config import PROCESSED_DATA_DIR, SVM_DATA_DIR, SVM_FIGURES_DIR
+from config import USE_ROI, PREFIX
 
-# ---------------------------------------------------------
-# THE SWITCH FOR FOCUS CHANNELS
-# True  = Benchmark mode (9 Central Channels - prevents EMG artifacts)
-# False = Exploratory mode (All 19 Channels - tests dimensionality & noise)
-USE_ROI = True
-# ---------------------------------------------------------
+# =============================================================================
+# PUBLICATION PLOT FUNCTION (Li et al. Replication)
+# =============================================================================
+def plot_msffs_curve(features_count, train_scores, cv_scores, cv_std, target_band):
+    """
+    Replicates Figure 3 from Li et al. (2026/2025) perfectly.
+    """
+    plt.figure(figsize=(12, 6))
+    
+    x_axis = np.array(features_count)
+    
+    # 1. Gray Area (Confidence Interval)
+    plt.fill_between(x_axis, 
+                     cv_scores - cv_std, 
+                     cv_scores + cv_std, 
+                     color='#e6eef4', alpha=0.7, label='Confidence Interval')
+    
+    # 2. Lines (Train = Orange, CV = Blue)
+    plt.plot(x_axis, cv_scores, marker='o', markersize=4, color='#5c8cbc', lw=1.5, label='cross-validation accuracy')
+    plt.plot(x_axis, train_scores, marker='o', markersize=4, color='#fba232', lw=1.5, label='training accuracy')
+    
+    # 3. Data Labels (Numerical values next to the data points)
+    for i, (tr, cv) in enumerate(zip(train_scores, cv_scores)):
+        plt.text(x_axis[i], tr + 0.002, f"{tr:.3f}", color='#fba232', fontsize=9, ha='center', va='bottom')
+        plt.text(x_axis[i], cv - 0.003, f"{cv:.3f}", color='#5c8cbc', fontsize=9, ha='center', va='top')
+
+    # 4. Styling
+    plt.title(f"Classification accuracy scores when searching in ROI {target_band} band", fontsize=12, pad=20)
+    plt.xlabel('number of features used', fontsize=11)
+    plt.ylabel('accuracy', fontsize=11)
+    plt.xticks(x_axis) 
+    plt.ylim([min(cv_scores - cv_std) - 0.02, 1.02])
+    
+    ax = plt.gca()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    plt.legend(loc='lower right', frameon=True)
+    plt.tight_layout()
+    plt.savefig(SVM_FIGURES_DIR / f"mSFFS_learning_curve_{target_band}.png", dpi=300)
+    plt.close()
+
 
 # =============================================================================
 # 1. LOAD TRAINING DATA ONLY
 # =============================================================================
-print("🚀 Loading Training Dataset...")
+print("Loading Training Dataset...")
 train_path = PROCESSED_DATA_DIR / "final_dataset_train.csv"
 train_df = pd.read_csv(train_path)
 
@@ -72,11 +108,11 @@ N_PERMUTATIONS = 1000
 results_summary = []
 
 mode_name = "BENCHMARK (9-Channel ROI)" if USE_ROI else "EXPLORATORY (All 19 Channels)"
-print(f"\n⚙️ Starting Training Phase in {mode_name} mode...")
+print(f"\nStarting Training Phase in {mode_name} mode...")
 
 for band in bands:
     print("\n" + "="*60)
-    print(f"🧠 TRAINING BAND: {band.upper()}")
+    print(f"TRAINING BAND: {band.upper()}")
     print("="*60)
     
     # --- A. FILTERING (Ablation Logic) ---
@@ -103,21 +139,18 @@ for band in bands:
 
     # --- C. STRATIFIED GROUP K-FOLD (Prevents Leakage) ---
     cv_strategy = StratifiedGroupKFold(n_splits=5) 
-    # cv_strategy = RepeatedStratifiedGroupKFold(n_splits=10) 
     cv_splits = list(cv_strategy.split(X_train_scaled, y_train, groups=groups_train))
 
     # --- D. FEATURE SELECTION (mSFFS) ---
     print("-> Running mSFFS (1 to 20 features)...")
-    base_svm = SVC(kernel='rbf', 
-                   gamma='scale', 
-                   random_state=RANDOM_STATE)
+    base_svm = SVC(kernel='rbf', gamma='scale', random_state=RANDOM_STATE)
     
     sfs = SFS(
         base_svm, 
         k_features=(1, 20),    
         forward=True,          
         floating=True,         
-        scoring='accuracy', # or 'roc_auc'
+        scoring='accuracy', 
         cv=cv_splits,          
         n_jobs=-1              
     )
@@ -126,30 +159,33 @@ for band in bands:
     selected_features = list(sfs.k_feature_names_)
     print(f"-> Optimal subset found ({len(selected_features)} features)")
     
-    fig1 = plot_sfs(sfs.get_metric_dict(), kind='std_dev', figsize=(10, 6))
-    plt.title(f'mSFFS Learning Curve (Subset Accuracy) - {band.upper()} Band')
-    plt.ylabel('CV Accuracy')
-    plt.xlabel('Number of Features')
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    curve_path = SVM_FIGURES_DIR / f"mSFFS_learning_curve_{band}.png"
-    plt.savefig(curve_path, dpi=300)
-    plt.close()
-    print(f"-> mSFFS Learning curve saved to {curve_path.name}")
+    # --- EXTRACT DATA FOR FIGURE 3 (Training vs CV line) ---
+    metric_dict = sfs.get_metric_dict()
+    f_counts, cv_scores, cv_stds, tr_scores = [], [], [], []
+    
+    for k in sorted(metric_dict.keys()):
+        f_counts.append(k)
+        cv_scores.append(metric_dict[k]['avg_score'])
+        cv_stds.append(metric_dict[k]['std_dev'])
         
-
+        # Retroactively calculate training accuracy for the orange line
+        subset = list(metric_dict[k]['feature_names'])
+        base_svm.fit(X_train_scaled[subset], y_train)
+        tr_scores.append(base_svm.score(X_train_scaled[subset], y_train))
+        
+    plot_msffs_curve(f_counts, np.array(tr_scores), np.array(cv_scores), np.array(cv_stds), band)
+    print(f"-> Paper-style mSFFS Learning curve saved.")
+        
     X_train_final = X_train_scaled[selected_features]
 
     # --- E. GRID SEARCH ---
     print("-> Running Grid Search for parameters...")
-    param_grid = {'C': [0.01, 0.1, 1, 10, 100, 1000],  # select error penalty
+    param_grid = {'C': [0.01, 0.1, 1, 10, 100, 1000],  
                   'gamma': np.logspace(-4, 1.5, 20),
                   'class_weight': ['balanced', None]}  
     
     grid_search = GridSearchCV(
-        SVC(kernel='rbf', 
-            probability=True, 
-            random_state=RANDOM_STATE),
+        SVC(kernel='rbf', probability=True, random_state=RANDOM_STATE),
         param_grid, 
         cv=cv_splits, 
         scoring='accuracy', 
@@ -174,7 +210,6 @@ for band in bands:
     print(f"-> Permutation p-value: {pvalue:.4f}")
 
     # --- G. SAVE ARTIFACTS TO .PKL ---
-    # Add a prefix to the filename if exploratory mode is used, so you don't overwrite benchmark models
     prefix = "ROI_" if USE_ROI else "ALL_"
     model_artifact = {
         'model': final_svm,
@@ -199,7 +234,7 @@ for band in bands:
 
 # --- H. SUMMARY REPORT ---
 print("\n" + "*"*80)
-print(f"🏆 TRAINING PHASE COMPLETED - {mode_name}")
+print(f"TRAINING PHASE COMPLETED - {mode_name}")
 summary_df = pd.DataFrame(results_summary).sort_values(by='Internal_CV_Accuracy', ascending=False)
 print(summary_df[['Band', 'Internal_CV_Accuracy', 'P_Value', 'Num_Features']].to_string(index=False))
 print("*"*80)

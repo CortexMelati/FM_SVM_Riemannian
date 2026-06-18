@@ -1,6 +1,6 @@
 """
 =============================================================================
-🧠 EEG PREPROCESSING PIPELINE (Li et al., 2026)
+EEG PREPROCESSING PIPELINE (Li et al., 2026)
 =============================================================================
 Overview:
     This script performs the preprocessing pipeline based strictly on the 
@@ -68,7 +68,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     from preprocessing.prep_plot import get_plots
 except ImportError:
-    print("⚠️ Warning: 'preprocessing_plotting.py' not found. Plots will be skipped.")
+    print("Warning: 'preprocessing_plotting.py' not found. Plots will be skipped.")
     def get_plots(*args, **kwargs): return None
 
 # =============================================================================
@@ -80,9 +80,6 @@ NUM_SUBJECTS_TO_PROCESS = None # Change to None for all files or nr. of files to
 # We focus purely on the CP_FM_dataset for this script, filter where needed.
 DATASETS = [
     (str(CP_FM_DIR), "*.vhdr", "cp_fm_dataset"),
-    #(str(FM_DIR), "*.vhdr", "fm_eo_dataset"),            # Jouw 499s Eyes Open data
-    #(str(TDBRAIN_DIR), "*.vhdr", "tdbrain_dataset"),     # Jouw 198s CP-HC data
-    #(str(CHRONIC_PAIN_DIR), "*.vhdr", "chronicpainset")  # Jouw 499s CP-only data
 ]
 
 COMMON_CHANNELS = CHANNELS_1020
@@ -101,12 +98,12 @@ def get_condition(filename):
     else: return 'unknown'
 
 def assign_label_from_filename(filename):
-    """Kijkt dynamisch of het bestand bij Healthy_0 of Patient_1 hoort o.b.v. config.py"""
+    """Dynamically checks if the file belongs to Healthy_0 or Patient_1 based on config.py"""
     fname_upper = filename.upper()
     for label_key, identifiers in LABEL_MAPPING.items():
         for identifier in identifiers:
             if identifier in fname_upper:
-                # Returnt de pure mapnaam, bijv 'FM' of 'HC' voor de folderstructuur
+                # Returns the pure folder name, e.g., 'Patient' or 'Control' for structuring
                 return 'Patient' if 'Patient' in label_key else 'Control'
     return None
 
@@ -121,17 +118,17 @@ def smart_rename_channels(raw):
     
     target_map = {ch.lower(): ch for ch in COMMON_CHANNELS}
     
-    # Gebruik de originele map (niet omgedraaid): 't3' -> 'T7'
+    # Use the original map (not inverted): 't3' -> 'T7'
     forward_map = {k.lower(): v for k, v in CHANNEL_RENAMING_MAP.items()}
     
     for ch in current_names:
         clean_ch = ch.replace('EEG', '').replace('Ref', '').replace(' ', '').replace('-', '').replace('.', '').lower()
         
-        # 1. Map oude namen (zoals 't3') naar moderne namen (zoals 'T7')
+        # 1. Map old names (like 't3') to modern names (like 'T7')
         if clean_ch in forward_map:
             mapping[ch] = forward_map[clean_ch]
             
-        # 2. Fix puur de hoofdletters voor de overige kanalen
+        # 2. Fix capitalization for the remaining channels
         elif clean_ch in target_map:
             std = target_map[clean_ch]
             if ch != std: 
@@ -141,7 +138,7 @@ def smart_rename_channels(raw):
         try: 
             raw.rename_channels(mapping)
         except Exception as e: 
-            print(f"⚠️ Renaming failed: {e}")
+            print(f"Warning: Renaming failed: {e}")
             
     return raw
 
@@ -207,16 +204,15 @@ def extract_connectivity_features(epochs, subject_id, condition, segment_idx):
 def process_subject(file_path, output_dir, dataset_name):
     filename = os.path.basename(file_path)
     
-    # 1. Dynamische Label Check in plaats van hardcoded 'fmpa'
+    # 1. Dynamic Label Check instead of hardcoded strings
     subject_group = assign_label_from_filename(filename)
     if not subject_group:
         return False, f"Skipped (No label in config.py for {filename})"
         
     condition = get_condition(filename)
-    
     subject_id = filename.split('_')[0] 
     
-    # Maak nette submappen aan op basis van de dataset en de conditie
+    # Create structured subfolders based on dataset and condition
     sub_folder = os.path.join(dataset_name, subject_group)
     save_dir = os.path.join(output_dir, sub_folder, subject_id)
     os.makedirs(save_dir, exist_ok=True)
@@ -254,57 +250,56 @@ def process_subject(file_path, output_dir, dataset_name):
         if raw.info['sfreq'] != sfreq: raw.resample(sfreq, verbose=False)
 
         # ==============================================================
-        # NIEUW: MACRO-SEGMENTATIE LOGICA (Li et al., 2026)
+        # MACRO-SEGMENTATION LOGIC (Li et al., 2026)
         # ==============================================================
         all_features = []
         all_epochs_data = []
         n_total_epochs = 0
         n_segments_used = 0
         
-        # We itereren om maximaal 5 segmenten van 30 seconden te halen
+        # Iterate to extract a maximum of 5 segments of 30 seconds
         for seg_idx in range(5):
             tmin_seg = seg_idx * 30.0
             tmax_seg = (seg_idx + 1) * 30.0
             
-            # Check of er nog 30 seconden data over is voor dit segment
+            # Check if there are 30 seconds of data left for this segment
             if raw.times[-1] < tmax_seg:
                 break
                 
-            # Maak een tijdelijke kopie van precies 30 seconden
+            # Create a temporary copy of exactly 30 seconds
             raw_seg = raw.copy().crop(tmin=tmin_seg, tmax=tmax_seg)
             
-            # Knip deze 30s op in de 1-seconde micro-epochs
+            # Split these 30s into 1-second micro-epochs
             epochs = mne.make_fixed_length_epochs(raw_seg, duration=EPOCH_LENGTH, overlap=0, preload=True, verbose=False)
             
             if len(epochs) < 10: 
-                continue # Negeer segmenten die cumulatief te kort zijn
+                continue # Ignore segments that are cumulatively too short
                 
             n_total_epochs += len(epochs)
             n_segments_used += 1
             all_epochs_data.append(epochs.get_data(copy=True))
             
-            # Feature extractie voor DIT specifieke 30s segment
+            # Feature extraction for THIS specific 30s segment
             df_seg = extract_connectivity_features(epochs, subject_id, condition, seg_idx + 1)
             all_features.append(df_seg)
             
         if not all_features:
-            return False, "Te weinig data over voor zelfs één 30s segment."
+            return False, "Insufficient data remaining for even one 30s segment."
 
-        # Voeg alle rijen (maximaal 5) samen tot één DataFrame en sla op
+        # Concatenate all rows (max 5) into one DataFrame and save
         df_features = pd.concat(all_features, ignore_index=True)
         df_features.to_csv(csv_check, index=False)
 
-
-        # combines the data before saving
+        # Combine the data before saving
         combined_data = np.vstack(all_epochs_data)
         
         # 7. REPORTING
         try:
-            # Gebruik de legitieme 'epochs'-variabele van het laatste 30s segment.
-            # Dit voorkomt spectrale transiënten door hstack-bewerkingen
+            # Use the legitimate 'epochs' variable from the last 30s segment.
+            # This prevents spectral transients from hstack operations.
             fig_after = get_plots(raw_seg, step=f"2. Preprocessed Segment (Last 30s)", scalings={'eeg': 40e-6}, channel_idx=[9])
         except Exception as plot_err: 
-            print(f"⚠️ Quality Control Plot na preprocessing mislukt: {plot_err}")
+            print(f"Warning: Quality Control Plot after preprocessing failed: {plot_err}")
             fig_after = None
 
         with PdfPages(pdf_check) as pdf:
@@ -338,55 +333,55 @@ def process_subject(file_path, output_dir, dataset_name):
 
 # --- MAIN LOOP ---
 if __name__ == "__main__":
-    print(f"🚀 Starting Connectivity Preprocessing Pipeline (Li et al. 2026)")
+    print(f"Starting Connectivity Preprocessing Pipeline (Li et al. 2026)")
     if NUM_SUBJECTS_TO_PROCESS is not None:
-        print(f" TEST MODE ACTIVE: Processing {NUM_SUBJECTS_TO_PROCESS} RANDOM subjects!")
+        print(f"TEST MODE ACTIVE: Processing {NUM_SUBJECTS_TO_PROCESS} RANDOM subjects!")
     
     all_files = []
     for folder, pattern, ds_name in DATASETS:
-        print(f" Scanning {folder} for {pattern}...")
+        print(f"Scanning {folder} for {pattern}...")
         
-        # Gebruik Pathlib voor robuuster zoeken (werkt beter over mappen heen)
+        # Use Pathlib for robust cross-platform searching
         search_dir = Path(folder)
         if not search_dir.exists():
-            print(f"   File {search_dir} does not exist!")
+            print(f"  File {search_dir} does not exist!")
             continue
             
-        # Vind alle bestanden (zoekt recursief door alle submappen)
+        # Find all files (searches recursively through all subfolders)
         found_paths = list(search_dir.rglob(pattern))
         found = [str(p) for p in found_paths]
         
-        print(f"   -> Ruwe {pattern} files found: {len(found)}")
+        print(f"  -> Raw {pattern} files found: {len(found)}")
         
         valid_found = []
         for f in found:
             f_lower = f.lower()
             
-            # Sla output folders over
+            # Skip output folders
             if 'clean' in f_lower or 'results' in f_lower:
                 continue
                 
             filename = os.path.basename(f)
             
-            # --- FIX: Sla NCCP proefpersonen expliciet over ---
-            if 'nccp' in filename.lower():
+            # Skip NCCP subjects explicitly
+            if 'cbp' in filename.lower():
                 continue
             
-            # Check enkel of we het label kunnen bepalen via config.py
+            # Check if we can determine the label via config.py
             if assign_label_from_filename(filename):
                 valid_found.append(f)
             
-        print(f"   -> Bestanden over na filteren (valide labels & zonder NCCP): {len(valid_found)}")
+        print(f"  -> Files remaining after filtering (valid labels & without NCCP): {len(valid_found)}")
         
-        # Nu we alleen de juiste bestanden over hebben, pakken we er random 1 (of meer)
+        # If limiting the number of subjects, sample randomly
         if NUM_SUBJECTS_TO_PROCESS is not None and len(valid_found) > 0:
-            aantal = min(NUM_SUBJECTS_TO_PROCESS, len(valid_found)) 
-            valid_found = random.sample(valid_found, aantal)
+            amount = min(NUM_SUBJECTS_TO_PROCESS, len(valid_found)) 
+            valid_found = random.sample(valid_found, amount)
             
         for f in valid_found:
             all_files.append((f, ds_name))
 
-    print(f"\n🔍 Total files to evaluate: {len(all_files)}")
+    print(f"\nTotal files to evaluate: {len(all_files)}")
     
     results = []
     for file_path, ds_name in tqdm(all_files, desc="Processing"):
@@ -395,7 +390,7 @@ if __name__ == "__main__":
 
     # Summary
     print("\n" + "="*50)
-    print("📊 FINAL SUMMARY")
+    print("FINAL SUMMARY")
     print("="*50)
     
     successes = [r for r in results if r[1] and "Skipped" not in r[2]]
@@ -403,14 +398,14 @@ if __name__ == "__main__":
     failures = [r for r in results if not r[1]]
 
     print(f"Total Found: {len(results)}")
-    print(f"✅ Processed: {len(successes)}")
-    print(f"⏭️  Skipped:   {len(skipped)}")
-    print(f"❌ Failed:    {len(failures)}")
+    print(f"Processed: {len(successes)}")
+    print(f"Skipped:   {len(skipped)}")
+    print(f"Failed:    {len(failures)}")
 
-    # --- NIEUW: Print de daadwerkelijke foutmeldingen ---
+    # Print the actual error messages
     if len(failures) > 0:
-        print("\n🚨 FOUTMELDINGEN:")
+        print("\nERROR LOGS:")
         for r in failures:
-            bestand = r[0]
-            fout = r[2]
-            print(f" -> {bestand}: {fout}")
+            file_failed = r[0]
+            error_msg = r[2]
+            print(f" -> {file_failed}: {error_msg}")

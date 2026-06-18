@@ -2,7 +2,7 @@
 =============================================================================
 EEG QUALITY CONTROL VISUALIZATION (Li et al., 2026 aligned)
 =============================================================================
-name: preprocessing_plotting.py
+name: prep_plotting.py
 
 Objective:
     Generate a composite dashboard for visual quality control of EEG data.
@@ -56,7 +56,7 @@ def get_plots(raw: mne.io.Raw, step: str,
 
     # 2. Plot Power Spectral Density (PSD)
     def plot_psd_img(raw, xscale):
-        # AANGEPAST: fmax verlaagd naar 50Hz, omdat we low-pass filteren op 44Hz.
+        # MODIFIED: fmax lowered to 50Hz, because we low-pass filter at 44Hz.
         fig = raw.compute_psd(fmin=1, fmax=50).plot(picks='eeg', show=False)
         
         fig.canvas.draw()
@@ -67,12 +67,12 @@ def get_plots(raw: mne.io.Raw, step: str,
 
     # 3. Plot Time-Frequency Representation (TFR)
     def plot_tfr_on_ax(raw, ax, ch_idx):
-        # AANGEPAST: Focus specifieker op de ranges uit de paper (tot 40Hz de gamma band)
+        # MODIFIED: Focus specifically on the ranges from the paper (up to 40Hz for gamma band)
         freqs = np.arange(4, 45, 2) 
         n_cycles = freqs / 2.0
         
         try:
-            # AANGEPAST: Duration naar 1.0 om gelijk te lopen met de 1-seconde epoching van de paper
+            # MODIFIED: Duration to 1.0 to align with the 1-second epoching from the paper
             epochs = mne.make_fixed_length_epochs(raw, duration=1.0, overlap=0, verbose=False)
             tfr = tfr_multitaper(epochs, freqs=freqs, n_cycles=n_cycles, use_fft=True, 
                                  average=True, return_itc=False)
@@ -80,7 +80,7 @@ def get_plots(raw: mne.io.Raw, step: str,
             tfr.plot([ch_idx], baseline=(None, None), mode='logratio', 
                      axes=ax, show=False, colorbar=True)
         except Exception as e:
-            print(f"⚠️ TFR Plot failed: {e}")
+            print(f"Warning: TFR Plot failed: {e}")
 
     # --- Assemble Composite Figure ---
     img_raw = plot_raw_img(raw, scalings)

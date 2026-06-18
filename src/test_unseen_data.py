@@ -3,7 +3,7 @@
 2. FINAL EXTERNAL VALIDATION (Testing on Unseen Data)
 =============================================================================
 Overview:
-    This script performs the final, unbiased evaluation of the trained models.
+    This script performs the final, unbiased evaluation of the trained SVM models.
     It acts as an external validation step, strictly isolating the test data.
     
     For EACH band, it will:
@@ -12,8 +12,10 @@ Overview:
         3. Apply the exact same feature subset and mathematical scaling to 
            the unseen data to prevent any data leakage.
         4. Predict the diagnosis (Healthy Control vs. Fibromyalgia Patient).
-        5. Calculate the true performance metrics (Accuracy, ROC-AUC, Precision, Recall).
+        5. Calculate the true performance metrics (Accuracy, ROC-AUC, AUPRC, 
+           Precision, Recall, Brier, ECE).
         6. Generate and save the final Confusion Matrix plots for your thesis.
+        7. Generate Figure 5 (Data Distribution via t-SNE projection).
 
 Execution:
     python test_unseen_data.py
@@ -27,22 +29,19 @@ import seaborn as sns
 from pathlib import Path
 import sys
 import joblib
-from sklearn.metrics import brier_score_loss
-from sklearn.manifold import TSNE
-import seaborn as sns
 
-from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score, confusion_matrix
+from sklearn.manifold import TSNE
+from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
+                             roc_auc_score, confusion_matrix, brier_score_loss,
+                             average_precision_score)
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import RESULTS_DIR
-from config import PROCESSED_DATA_DIR, FIGURES_DIR
+from config import PROCESSED_DATA_DIR, SVM_FIGURES_DIR, SVM_DATA_DIR
+from config import USE_ROI, PREFIX
 
-# Ablation Switch
-USE_ROI = True  
-
-
-print("🔓 Opening the Vault: Loading Unseen Test Data...")
+print("Opening the Vault: Loading Unseen Test Data...")
 test_path = PROCESSED_DATA_DIR / "final_dataset_test.csv"
 test_df = pd.read_csv(test_path)
 
@@ -53,16 +52,16 @@ X_test_full = test_df.drop(columns=[c for c in meta_cols if c in test_df.columns
 bands = ['delta', 'theta', 'alpha', 'beta', 'gamma'] 
 test_results = []
 
-print(f"\n📊 Evaluating models on unseen data...")
+print(f"\nEvaluating models on unseen data...")
 
-# Hulpfunctie voor ECE berekening
+# Helper function for Expected Calibration Error (ECE)
 def expected_calibration_error(y_true, y_prob, n_bins=10):
     bin_limits = np.linspace(0, 1, n_bins + 1)
     ece = 0.0
     for i in range(n_bins):
         bin_lower, bin_upper = bin_limits[i], bin_limits[i+1]
         in_bin = (y_prob >= bin_lower) & (y_prob < bin_upper)
-        if i == n_bins - 1: # Zorg dat 1.0 wordt meegenomen in de laatste bin
+        if i == n_bins - 1: # Ensure 1.0 is included in the final bin
             in_bin = (y_prob >= bin_lower) & (y_prob <= bin_upper)
         
         if np.sum(in_bin) > 0:
@@ -72,15 +71,11 @@ def expected_calibration_error(y_true, y_prob, n_bins=10):
             ece += bin_weight * np.abs(bin_acc - bin_conf)
     return ece
 
-
-
 for band in bands:
-    # 1. FIX: Gebruik de juiste prefix gebaseerd op de Ablation Switch
-    prefix = "ROI_" if USE_ROI else "ALL_"
-    model_path = PROCESSED_DATA_DIR / f"saved_model_{prefix}{band}.pkl"
+    model_path = SVM_DATA_DIR / f"saved_model_{PREFIX}{band}.pkl"
     
     if not model_path.exists():
-        print(f"Waarschuwing: Model for {band} ({prefix}) not found. Skipping...")
+        print(f"  Warning: Model for {band} ({PREFIX}) not found. Skipping...")
         continue
         
     # 1. LOAD THE FROZEN ARTIFACTS
@@ -104,15 +99,16 @@ for band in bands:
     prec = precision_score(y_test, y_pred, zero_division=0)
     rec = recall_score(y_test, y_pred, zero_division=0)
     auc = roc_auc_score(y_test, y_prob)
+    auprc = average_precision_score(y_test, y_prob) 
     
     brier = brier_score_loss(y_test, y_prob)
     ece = expected_calibration_error(y_test, y_prob)
     
-    # 2. FIX: Slechts één enkele append met alle data
     test_results.append({
         'Band': band.upper(),
         'Unseen_Accuracy': acc,
         'ROC_AUC': auc,
+        'AUPRC': auprc,
         'Brier_Score': brier,
         'ECE': ece,
         'Precision': prec,
@@ -130,23 +126,43 @@ for band in bands:
     plt.ylabel('True Label', fontsize=12)
     plt.xlabel('Predicted Label', fontsize=12)
     plt.tight_layout()
-
-    # Gebruik ook hier de prefix bij het opslaan van de plots
-    plot_path = RESULTS_DIR / f"final_confusion_matrix_{prefix}{band}.png"
+    plot_path = SVM_FIGURES_DIR / f"final_confusion_matrix_{PREFIX}{band}.png"
     plt.savefig(plot_path, dpi=300)
     plt.close()
     
-    # 6. GENERATE t-SNE
-    print(f"-> Generating t-SNE plot for {band}...")
+    # 6. GENERATE FIGURE 5 (DATA DISTRIBUTION VIA t-SNE)
+    print(f"  -> Generating t-SNE data distribution (Fig 5) for {band}...")
+    
+    # t-SNE projection
     tsne = TSNE(n_components=2, perplexity=min(30, len(X_test_final)-1), random_state=42)
     X_tsne = tsne.fit_transform(X_test_final)
     
+    # Plotting Figure 5 Replication
     plt.figure(figsize=(8, 6))
-    sns.scatterplot(x=X_tsne[:, 0], y=X_tsne[:, 1], hue=y_test, palette={0: '#1f77b4', 1: '#d62728'}, s=60, alpha=0.8)
-    plt.title(f't-SNE Data Distribution (mSFFS Features) - {band.upper()}')
-    plt.legend(title='Class', labels=['HC (0)', 'FM (1)'])
+    
+    # Custom color palette mapping to the paper's style
+    scatter = sns.scatterplot(
+        x=X_tsne[:, 0], y=X_tsne[:, 1], 
+        hue=y_test, 
+        palette={0: '#5c8cbc', 1: '#d62728'}, # Blue for HC, Red for FM
+        s=80, alpha=0.8, edgecolor='white'
+    )
+    
+    plt.title(f"Data Distribution of Selected Connectivity Features\n({band.upper()} Band - t-SNE Projection)", fontsize=14, pad=15)
+    plt.xlabel("t-SNE Dimension 1", fontsize=11)
+    plt.ylabel("t-SNE Dimension 2", fontsize=11)
+    
+    # Styling cleanup
+    ax = plt.gca()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    # Fix legend labels
+    handles, labels = scatter.get_legend_handles_labels()
+    plt.legend(handles=handles, labels=['Healthy Control (HC)', 'Fibromyalgia (FM)'], title='Diagnosis', frameon=True)
+    
     plt.tight_layout()
-    tsne_path = FIGURES_DIR / f"tsne_plot_{prefix}{band}.png"
+    tsne_path = SVM_FIGURES_DIR / f"data_distribution_fig5_{PREFIX}{band}.png"
     plt.savefig(tsne_path, dpi=300)
     plt.close()
 
@@ -155,8 +171,8 @@ print("\n" + "*"*80)
 print(f"FINAL TRUE PERFORMANCE ON UNSEEN TEST DATA ({'ROI' if USE_ROI else 'ALL CHANNELS'})")
 print("*"*80)
 summary_df = pd.DataFrame(test_results).sort_values(by='Unseen_Accuracy', ascending=False)
-print(summary_df.to_string(index=False))
+print(summary_df.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
 
-summary_path = RESULTS_DIR / f"final_test_results_{'ROI' if USE_ROI else 'ALL'}.csv"
+summary_path = SVM_DATA_DIR / f"final_test_results_{PREFIX}.csv"
 summary_df.to_csv(summary_path, index=False)
 print(f"\nValidation results saved to: {summary_path.name}")

@@ -27,6 +27,14 @@ TDBRAIN_DIR = DATA_ROOT / "TDBRAIN-dataset"    # TDBRAIN dataset
 CHRONIC_PAIN_DIR = DATA_ROOT / "Chronicpainset" # Chronic Pain dataset
 # NOT_USABLE_DIR = DATA_ROOT / "OSF_mj9xr_notusable" # Ignored by the pipeline
 
+# ==========================================
+# ABLATION SWITCH (Centralized)
+# ==========================================
+# True  = Benchmark mode (9 Central Channels - prevents EMG artifacts)
+# False = Exploratory mode (All 19 Channels)
+USE_ROI = False
+PREFIX = "ROI_" if USE_ROI else "ALL_"
+
 ACTIVE_DATASET_NAME = CP_FM_DIR.name
 
 # Output Directories (dynamisch gerouteerd per dataset)
@@ -43,7 +51,6 @@ SVM_DATA_DIR = PROCESSED_DATA_DIR / "svm_data"
 SVM_FIGURES_DIR = FIGURES_DIR / "svm_figures"
 
 
-
 # Ensure output directories exist
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -52,6 +59,7 @@ RIEMANN_DATA_DIR.mkdir(parents=True, exist_ok=True)
 RIEMANN_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 SVM_DATA_DIR.mkdir(parents=True, exist_ok=True)
 SVM_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
 # ==========================================
 # 2. PREPROCESSING & TIMING PARAMETERS (Li et al., 2026)
 # ==========================================
@@ -66,8 +74,8 @@ SFREQ_MAP = {
 # Substrings in filenames used to automatically assign target labels 
 # (0 = Healthy Control, 1 = Patient/Chronic Pain/Fibromyalgia)
 LABEL_MAPPING = {
-    'Healthy_0': ['FMHC'], # 'HC', 'HEALTHY', 'CONTROL'],
-    'Patient_1': ['FMPA'] #, 'FM', 'CP', 'PAIN', 'CHRONICPAIN'] 
+    'Healthy_0': ['FMHC', 'NCCPHC', 'HC'], 
+    'Patient_1': ['FMPA', 'CBPPA', 'NCCPPA', 'PA'] 
 }
 
 

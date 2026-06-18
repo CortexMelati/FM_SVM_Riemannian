@@ -15,15 +15,51 @@ Execution:
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from pathlib import Path
 import sys
 import joblib
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import PROCESSED_DATA_DIR, CHANNELS_1020, BANDS, BEST_CHANNELS_EVALUATE, RIEMANN_DATA_DIR
+# Toegevoegd: RIEMANN_FIGURES_DIR zodat we de plot kunnen opslaan
+from config import PROCESSED_DATA_DIR, CHANNELS_1020, BANDS, BEST_CHANNELS_EVALUATE, RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR
 
 ROI_CHANNELS = ['F3', 'Fz', 'F4', 'C3', 'Cz', 'C4', 'P3', 'Pz', 'P4']
+
+def plot_riemann_bar_chart(ranking_df, target_band, layout):
+    """
+    Maakt een Bar Chart van de Riemann top-features, in de stijl van Fig 6A.
+    """
+    # Pak de top 10 features
+    top_df = ranking_df.head(10).copy()
+    top_df['Feature_Name'] = top_df['Channel_A'] + "-" + top_df['Channel_B'] + f"({target_band.lower()})"
+    
+    # Sorteer oplopend zodat de belangrijkste bovenaan staat in de horizontale plot
+    top_df = top_df.sort_values(by='Absolute_Importance', ascending=True)
+    
+    plt.figure(figsize=(10, 6))
+    
+    # De paper gebruikt een strakke, effen kleur
+    bars = plt.barh(top_df['Feature_Name'], top_df['Absolute_Importance'], color='#5c8cbc')
+    
+    # Zet de waardes rechts naast de balkjes
+    for bar in bars:
+        plt.text(bar.get_width() + 0.05, bar.get_y() + bar.get_height()/2, 
+                 f"{bar.get_width():.2f}", 
+                 va='center', ha='left', fontsize=10)
+
+    plt.title(f"Riemannian Feature Importance - {target_band.upper()} Band ({layout.upper()})", pad=20)
+    plt.xlabel('Absolute SVM Weight (Tangent Space)', fontsize=11)
+    
+    # Clean up axes
+    ax = plt.gca()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(RIEMANN_FIGURES_DIR / f"riemann_bar_plot_{target_band.lower()}_{layout}.png", dpi=300)
+    plt.close()   
 
 def compute_global_ranking(target_band='BETA', layout='whole'):
     print(f"🚀 Extracting global feature rankings for {target_band} band ({layout.upper()} layout)...")
@@ -74,6 +110,10 @@ def compute_global_ranking(target_band='BETA', layout='whole'):
     print("-" * 75)
     print(ranking_df.head(5).to_string(index=False))
     print("-" * 75)
+    
+    # ---- NIEUW: ROEP DE VISUALISATIE AAN ----
+    plot_riemann_bar_chart(ranking_df, target_band, layout)
+    print(f"  ✓ Bar chart saved to {RIEMANN_FIGURES_DIR.name}")
 
 if __name__ == "__main__":
     # Run ranking for your top-performing predictive bands across both layouts

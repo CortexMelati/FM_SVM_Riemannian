@@ -6,7 +6,8 @@ Overview:
     This script evaluates the frozen Riemannian models (trained in Step 2) 
     exclusively on the 20% hold-out unseen test set generated in Step 1.
     It computes the final clinical performance metrics (Unseen Accuracy, 
-    ROC-AUC, Sensitivity, Specificity) across both Whole-Brain and ROI layouts.
+    ROC-AUC, Sensitivity, Specificity, and now AUPRC, Precision, and ECE) 
+    across both Whole-Brain and ROI layouts.
 
 Execution:
     python 4_evaluate_testset.py
@@ -18,7 +19,9 @@ import pandas as pd
 from pathlib import Path
 import sys
 import joblib
-from sklearn.metrics import recall_score, roc_auc_score, brier_score_loss, balanced_accuracy_score
+from sklearn.metrics import (recall_score, roc_auc_score, brier_score_loss, 
+                             balanced_accuracy_score, average_precision_score, 
+                             precision_score)
 
 # ==========================================
 # 0. CONFIG IMPORT & SYSTEM SETUP
@@ -26,6 +29,24 @@ from sklearn.metrics import recall_score, roc_auc_score, brier_score_loss, balan
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import PROCESSED_DATA_DIR, BANDS, RIEMANN_DATA_DIR
+
+def expected_calibration_error(y_true, y_prob, n_bins=10):
+    """
+    Computes the Expected Calibration Error (ECE) across 10 probability bins.
+    Essential for quantifying the clinical reliability of the model's confidence.
+    """
+    bin_edges = np.linspace(0., 1., n_bins + 1)
+    binned_true = np.digitize(y_prob, bin_edges) - 1
+    
+    ece = 0.0
+    for i in range(n_bins):
+        bin_mask = binned_true == i
+        if np.sum(bin_mask) > 0:
+            bin_acc = np.mean(y_true[bin_mask])
+            bin_conf = np.mean(y_prob[bin_mask])
+            bin_weight = np.sum(bin_mask) / len(y_true)
+            ece += bin_weight * np.abs(bin_acc - bin_conf)
+    return ece
 
 def evaluate_testset():
     print("🚀 STARTING STEP 4: RIGOROUS EVALUATION ON UNSEEN HOLD-OUT TEST SET")
@@ -72,16 +93,24 @@ def evaluate_testset():
                 roc_auc = roc_auc_score(y_test, y_prob)
                 brier = brier_score_loss(y_test, y_prob)
                 
+                # Compute the newly added clinical performance metrics
+                auprc = average_precision_score(y_test, y_prob)
+                prec = precision_score(y_test, y_pred, zero_division=0)
+                ece = expected_calibration_error(y_test, y_prob)
+                
                 # Append scores to the master results list
                 test_results.append({
                     'Band': band_name,
                     'Layout': layout,
                     'Model': model_type,
-                    'Unseen_Accuracy': bal_acc,
+                    'Bal_Acc': bal_acc,
+                    'AUPRC': auprc,
                     'ROC_AUC': roc_auc,
-                    'Brier_Score': brier,
                     'Sensitivity': sens,
-                    'Specificity': spec
+                    'Specificity': spec,
+                    'Precision': prec,
+                    'Brier_Score': brier,
+                    'ECE': ece
                 })
 
     if not test_results:
@@ -94,12 +123,12 @@ def evaluate_testset():
     df_results = pd.DataFrame(test_results)
     
     # Sort the performance matrix hierarchically for academic presentation
-    df_results = df_results.sort_values(by=['Layout', 'Model', 'Unseen_Accuracy'], ascending=[True, True, False])
+    df_results = df_results.sort_values(by=['Layout', 'Model', 'Bal_Acc'], ascending=[True, True, False])
     
     print("\n🏆 FINAL METRIC REPORT (UNSEEN TARGET POPULATION):")
-    print("-" * 110)
+    print("-" * 120)
     print(df_results.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
-    print("-" * 110)
+    print("-" * 120)
     
     # Export to CSV for explicit integration within latex table environments
     output_path = RIEMANN_DATA_DIR / "riemann_testset_results.csv"
