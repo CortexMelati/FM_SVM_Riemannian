@@ -60,6 +60,20 @@ RIEMANN_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 SVM_DATA_DIR.mkdir(parents=True, exist_ok=True)
 SVM_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
+
+# ==============================================================================
+# POST-HOC EVALUATION & CROSS-DOMAIN SETTINGS
+# ==============================================================================
+# The primary frequency band used for SHAP, Bias Evaluation, and Cross Validation
+FOCUS_BAND = 'beta' # change to the best band from 1_SVM_feature_ranking 
+
+
+# Internal Cross-Domain Validation cohorts (matched with participants.tsv 'study' column)
+CROSS_SOURCE_DATASET = "FM"    # Primary cohort for Train/Test
+CROSS_TARGET_DATASET = "NCCP"  # Isolated cohort for Transfer Learning
+
+
+
 # ==========================================
 # 2. PREPROCESSING & TIMING PARAMETERS (Li et al., 2026)
 # ==========================================
@@ -136,8 +150,11 @@ BANDS = {
 MT_BANDWIDTH = 4.0 # 4 = standard, 2 = more precise (more noise), 
                     # 8  = smoother (less resolution)
 
+
+
+
 # ==============================================================================
-# 5. MACHINE LEARNING & VISUALIZATION METRICS
+# 6. MACHINE LEARNING & VISUALIZATION METRICS
 # ==============================================================================
 RANDOM_STATE = 42
 TEST_SIZE = 0.2 # paper uses 0.1 
@@ -145,9 +162,12 @@ MIN_AGE = 18.0
 
 
 # Documented core features identified via mSFFS for reference verification
-PAPER_TOP_5_FEATURES = [
+# amend after rolling 2_SVM_roi_feature_screening
+OUR_TOP_5_FEATURES = [
     ('Fz', 'Cz'), ('Pz', 'P4'), ('Fz', 'C3'), ('Cz', 'P4'), ('Cz', 'Pz')
 ]
+
+
 
 # Consistent color scheme for plots
 COLORS = {

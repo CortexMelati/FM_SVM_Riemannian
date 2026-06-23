@@ -7,6 +7,8 @@ Overview:
     and STRICTLY isolates the primary cohort for the Train/Test split.
     The target domain (e.g., 'NCCP') is saved separately to prevent data leakage
     prior to cross-domain validation.
+    
+python build_dataset.py
 =============================================================================
 """
 
@@ -21,7 +23,7 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import (RESULTS_DIR, LABEL_MAPPING, TEST_SIZE, RANDOM_STATE, 
                     PROCESSED_DATA_DIR, PROJECT_ROOT, ACTIVE_DATASET_NAME,
-                    CROSS_SOURCE_DATASET, CROSS_TARGET_DATASET)
+                    CROSS_SOURCE_DATASET, CROSS_TARGET_DATASET, CP_FM_DIR)
 
 print("Starting Dataset Aggregation...")
 
@@ -36,7 +38,17 @@ if not feature_files:
 all_data = []
 for file in feature_files:
     all_data.append(pd.read_csv(file))
+    
 master_df = pd.concat(all_data, ignore_index=True)
+master_df = master_df.copy() # <-- FIX: This resolves the PerformanceWarning!
+
+# --- EC FILTERING ---
+if 'Condition' in master_df.columns:
+    initial_rows = len(master_df)
+    master_df = master_df[master_df['Condition'] == 'EC'].copy()
+    print(f"-> Filtered to EC only: removed {initial_rows - len(master_df)} non-EC rows.")
+else:
+    print("-> WARNING: No 'Condition' column found. Proceeding with all data.")
 
 def assign_label(subject_id):
     subject_upper = str(subject_id).upper()
@@ -51,17 +63,28 @@ master_df = master_df.dropna(subset=['Target'])
 master_df['Target'] = master_df['Target'].astype(int)
 
 # 2. MERGE WITH METADATA TO PREVENT DATA MIXING
-tsv_path = PROJECT_ROOT / "data" / ACTIVE_DATASET_NAME / "data" / "participants.tsv"
-participants_df = pd.read_csv(tsv_path, sep='\t')
-if 'participant_id' in participants_df.columns:
-    participants_df['Subject'] = participants_df['participant_id'].str.replace('sub-', '')
+tsv_path = CP_FM_DIR / "data" / "participants.tsv" 
 
+if not tsv_path.exists():
+    print(f"FATAL ERROR: Cannot find participants.tsv at path:\n{tsv_path}")
+    sys.exit()
+
+participants_df = pd.read_csv(tsv_path, sep='\t')
+
+if 'participant_id' in participants_df.columns:
+    participants_df['Subject'] = participants_df['participant_id']
+
+# Voer de merge uit
 merged_df = pd.merge(master_df, participants_df[['Subject', 'study']], on='Subject', how='inner')
 
+if merged_df.empty:
+    print("FATAL ERROR: Merge resulted in 0 rows! Please check your file names and TSV IDs.")
+    sys.exit()
+
 # 3. ISOLATE PRIMARY COHORT AND TARGET COHORT
-# Using variables defined in config.py (e.g., FM and NCCP)
-source_cohort_name = "FM"
-target_cohort_name = "NCCP"
+# Using variables defined in config.py
+source_cohort_name = CROSS_SOURCE_DATASET
+target_cohort_name = CROSS_TARGET_DATASET
 
 source_df = merged_df[merged_df['study'] == source_cohort_name].copy()
 target_df = merged_df[merged_df['study'] == target_cohort_name].copy()

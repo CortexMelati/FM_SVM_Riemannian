@@ -1,4 +1,3 @@
-
 # EEG-Based Fibromyalgia Classification Pipeline
 
 **A Methodological Replication and Extension of Li et al. (2026)** *Paper DOI:* [10.3389/fpain.2025.1704444](https://doi.org/10.3389/fpain.2025.1704444)
@@ -38,6 +37,35 @@ All global variables, random states, channel selections (10-20 system), and the 
 * **5. Post-Hoc Interpretability (`shap_analysis.py`):**
   Generates SHAP values to quantify biomarker contributions. Exports the Mean Absolute SHAP Bar Chart *(Figure 6A)*, the Beeswarm Summary *(Figure 6B)*, and maps the top 5 functional connections onto an MNE-Python topographical head map *(Figure 4)*.
 
+Dus we hebben eerst een plot met het gehele hoofd meest belangrijke coherence features (Daar selecteren we de beste band van, welke het meest voorkomt)
+
+dan selecteren we de top 10 coherence features binnen die belangrijke band (die het meest voorkomt) en in de ROI. (figuur voor maken met lijntjes, nog toevoegen). Dan creëren ze een script waarin ze trainen met die 10 features + 10 andere die ze er nog bij konden maken binnen de ROI en kijken welke settings het beste zijn.
+
+Vervolgens gebruiken ze die settings, met de top 5/6/7/8 features (vanaf wanneer het model niet meer significante verbeteringen maakt) om het echte SVM model te trainen. In die tussenstap maken ze nog een topografie mapje met de geselecteerde top 5/6/7/8 features. En vanuit het echte SVM model krijgen we dan dus het Tsne figuur, Fig 6 A+B
+
+* **`1_SVM_global_feature_ranking.py`**
+  * **Input:** De volledige dataset met alle 855 features (alle kanalen, alle banden).
+  * **Process:** Er wordt een snelle baseline SVM getraind om globale SHAP-waarden te berekenen over de gehele opzet.
+  * **Output:** **Figuur 1** (Horizontale SHAP-balken van de top 15 globale features), waarmee mathematisch wordt aangetoond dat de uiteindelijke-band en de centrale kanalen de hoogste voorspellende waarde hebben. Dit rechtvaardigt de stap naar de ROI.
+* **`2_SVM_roi_feature_screening.py`**
+  * **Input:** Data gefilterd op de gekozen beste-band en de 9 centrale ROI-kanalen (36 mogelijke connectie-features).
+  * **Process:** Een SHAP-analyse op deze sub-selectie om de top 10 connecties binnen de ROI te identificeren.
+  * **Output:** Een netwerk-topografiemap met exact 10 lijnen die deze initiële screening visueel in kaart brengt.
+* **`3_`SVM_`feature_selection_msffs.py`**
+  * **Input:** De gescreende ROI-data uit de vorige stap.
+  * **Process:** Het mSFFS-algoritme bouwt incrementele subsets op van 1 tot 20 features en berekent via *StratifiedGroupKFold* de cross-validation en training accuracies.
+  * **Output:** **Figuur 3** (De mSFFS-curve met de blauwe en oranje lijnen). Aan de hand van deze curve stel je vast bij welk aantal features (in de paper 5) de accuraatheid afvlakt en de standaarddeviatie het laagst is.
+* **`4_`SVM_`final_model_training.py`**
+  * **Input:** De trainingsdata (80%) gereduceerd tot *strictly* de top-5(of meer) features geselecteerd uit de mSFFS-curve (Fz-Cz, Pz-P4, Fz-C3, Cz-P4, Cz-Pz).
+  * **Process:** De definitieve SVM (RBF) wordt getraind via Grid Search om de optimale hyper-parameters (**$C$** en **$\gamma$**) te vinden voor exact deze selected features. De statistische significantie wordt getoetst met de 1000-shuffle permutatietest. Het model en de scaler worden hierna bevroren opgeslagen als `.pkl`.
+  * **Output:** **Figuur 4** (De definitieve topografische hersenkaart met exact 5 rode lijnen + dikte naar importance die de geselecteerde biomarkers tonen).
+* **`5_`SVM_`model_evaluation_and_shap.py`**
+  * **Input:** De hold-out testset (20%) gefilterd naar de top selected features, en het bevroren model-artifact.
+  * **Process:** Het onaangetaste model doet blinde voorspellingen op de testset. De definitieve statistieken (accuraatheid, recall, Brier-score, ECE) worden berekend. Vervolgens worden de SHAP-waarden berekend voor dit specifieke selected feature model.
+  * **Output:** De Confusion Matrix (Supplementary Table S3), **Figuur 5** (De duidelijke scheiding in de t-SNE/PCA puntenwolk), en **Figuur 6A & 6B** (De definitieve bar- en beeswarm SHAP-plots van uitsluitend de gekozen biomarkers).
+
+*(Optioneel) Bias Analyse:* Ik heb het blok voor age/sex bias even uitgeschakeld om het script niet te log te maken, maar je kunt het makkelijk later toevoegen als je dat nodig hebt voor je discussiehoofdstuk.
+
 ### Phase 2: Geometry-Based Riemannian Pipeline
 
 * **1. Strict Preprocessing (`1_preprocess_riemann.py`):**
@@ -48,6 +76,16 @@ All global variables, random states, channel selections (10-20 system), and the 
   Evaluates the frozen geometry models on the hold-out set, generating equivalent clinical metrics (AUPRC, ECE). Reconstructs Tangent Space weights back into anatomical electrode pairs to plot geometric network connections.
 * **4. Feature Ranking (`5_riemann_feature_ranking.py`):**
   Extracts and ranks global feature weights from the Riemannian pipeline to generate a mathematical comparison against the SVM mSFFS selection.
+
+
+
+* **`1_preprocess_riemann.py`** : (Dit was jouw script 1). Het filtert en genereert de covariantie-matrices. We moeten hier alleen zorgen dat de EC-filter 100% waterdicht is.
+* **`2_SVM_Riemannian_Model_Training.py`** : (Het traint, optimaliseert (`GridSearchCV`) en kiest de winnaar (MDM of TS-SVM). Het bevriest het model (`.pkl`).
+* **`3_Riemannian_Biomarker_Map.py`** : (Jouw script 3 & 5 samengevoegd). Als TS-SVM wint, extraheren we de gewichten en tekenen we de paper-ready hersenkaart (groen/bruin/roze) met 19 kanalen.
+* **`4_Riemannian_Model_Evaluation.py`** : (Jouw script 4). Het evalueert de winnaar op de ongeziene testset. Het maakt het .txt-rapport (met accuraatheid, Brier, ECE, Precision, Recall) en de Confusion Matrix.
+* **`5_Riemannian_Data_Distribution.py`** : We maken een t-SNE plot, maar dan op basis van de Riemannian datastructuur (Tangent Space).
+* **`6_Riemannian_Training_Logbook.py`** : Het maakt het hyperparameter logboek voor Riemann.
+* **`7_Riemannian_Female_Sensitivity.py`** : De female-only confounding check, maar dan op de Riemannian data.
 
 ### Phase 3: Clinical Fairness & Generalizability
 

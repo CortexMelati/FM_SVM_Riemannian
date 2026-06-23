@@ -1,12 +1,18 @@
 """
 =============================================================================
-2. TRAIN RIEMANN (MULTI-BAND & DUAL-LAYOUT EXPERIMENT)
+2. RIEMANNIAN BAND SELECTION & GRID SEARCH (Unified Pipeline)
 =============================================================================
 Overview:
-    Trains TS-SVM and MDM on the covariance matrices of ALL frequency bands
-    (Delta, Theta, Alpha, Beta, Gamma) and BOTH spatial layouts (Whole vs ROI)
-    via Stratified Group K-Fold CV.
-    
+    This script evaluates the most robust Riemannian configuration. It tests 
+    all 5 canonical frequency bands across three primary architectures:
+    1. MDM (Covariance)
+    2. TS-SVM (Covariance)
+    3. TS-SVM (Xdawn Spatial Filtering)
+    4. TS-SVM (Coherence - using lagged coherence)
+
+    For the SVM architectures, it utilizes GridSearchCV to empirically select 
+    the optimal Kernel ('linear' vs 'rbf') and Regularization parameter (C).
+
 Execution:
     python 2_train_riemann.py
 =============================================================================
@@ -17,96 +23,153 @@ import pandas as pd
 from pathlib import Path
 import sys
 import joblib
+import mne
+from tqdm import tqdm # Toegevoegd voor de voortgangsbalk
 
-current_dir = Path(__file__).resolve().parent
-sys.path.append(str(current_dir.parent))
-from config import PROCESSED_DATA_DIR, RANDOM_STATE, BANDS, RIEMANN_DATA_DIR
-
+from pyriemann.estimation import Covariances, Coherences, XdawnCovariances
 from pyriemann.tangentspace import TangentSpace
 from pyriemann.classification import MDM
+
 from sklearn.svm import SVC
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.model_selection import StratifiedGroupKFold, GridSearchCV
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import recall_score, roc_curve, auc, confusion_matrix
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.metrics import balanced_accuracy_score
 
-def train_models():
-    print("🚀 STARTING STEP 2: MULTI-BAND & DUAL-LAYOUT MODEL TRAINING (TS-SVM vs MDM)")
+try:
+    from pyriemann.preprocessing import NearestSPD
+except ImportError:
+    try:
+        from pyriemann.estimation import NearestSPD
+    except ImportError:
+        from sklearn.base import BaseEstimator, TransformerMixin
+        from pyriemann.utils.base import nearest_sym_pos_def
+        class NearestSPD(BaseEstimator, TransformerMixin):
+            def fit(self, X, y=None): return self
+            def transform(self, X): return np.array([nearest_sym_pos_def(x) for x in X])
+
+# Ensure central config logic is imported
+current_dir = Path(__file__).resolve().parent
+sys.path.append(str(current_dir.parent))
+from config import RANDOM_STATE, BANDS, RIEMANN_DATA_DIR, SVM_DATA_DIR, SFREQ_MAP, ACTIVE_DATASET_NAME, CHANNELS_1020, BEST_CHANNELS_EVALUATE
+
+SFREQ = SFREQ_MAP.get(ACTIVE_DATASET_NAME, 500)
+ROI_INDICES = [CHANNELS_1020.index(ch) for ch in BEST_CHANNELS_EVALUATE]
+
+# --- Custom Transformers ---
+class MNEBandPass(BaseEstimator, TransformerMixin):
+    def __init__(self, l_freq, h_freq, sfreq=500):
+        self.l_freq, self.h_freq, self.sfreq = l_freq, h_freq, sfreq
+    def fit(self, X, y=None): return self
+    def transform(self, X):
+        iir_params = dict(order=4, ftype='butter', output='sos')
+        return mne.filter.filter_data(X.astype(np.float64), sfreq=self.sfreq, l_freq=self.l_freq, h_freq=self.h_freq, method='iir', iir_params=iir_params, verbose=False)
+
+class ROIExtractor(BaseEstimator, TransformerMixin):
+    def __init__(self, indices): self.indices = indices
+    def fit(self, X, y=None): return self
+    def transform(self, X): return X[:, self.indices, :]
+
+def run_comprehensive_band_selection():
+    print("🚀 STARTING STEP 2: UNIFIED RIEMANNIAN TRAINING & GRID SEARCH")
     
+    raw_data_path = RIEMANN_DATA_DIR / "X_train_raw.npy"
+    if not raw_data_path.exists():
+        sys.exit(f"🚨 Missing raw data: {raw_data_path.name}. Run Script 1.")
+
+    X_raw = np.load(raw_data_path)
     y = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
     groups = np.load(RIEMANN_DATA_DIR / "groups_train_riemann.npy")
 
-    pipelines = {
-        'TS-SVM': Pipeline([
-            ('ts', TangentSpace(metric='riemann')),
-            ('scaler', StandardScaler()),
-            ('svm', SVC(kernel='linear', 
-                        class_weight='balanced', 
-                        probability=True, 
-                        random_state=RANDOM_STATE))
-        ]),
-        'MDM': Pipeline([
-            ('mdm', MDM(metric=dict(mean='riemann', 
-                                    distance='riemann')))
-        ])
-    }
-
-    cv = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+    param_grid_svm = {'svm__kernel': ['linear', 'rbf'], 'svm__C': [0.01, 0.1, 1, 10, 100]}
     
+    # K-Folds instellen (5 outer folds)
+    n_splits_outer = 5
+    cv_outer = StratifiedGroupKFold(n_splits=n_splits_outer, shuffle=True, random_state=RANDOM_STATE)
+    cv_inner = StratifiedGroupKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE) 
+
     results = []
-    plot_data = {'roc': {}, 'cm': {}}
+    best_score = 0
+    best_pipeline = None
+    best_model_name = ""
 
-    # LOOP OVER SAVED BANDS
-    for band_name in BANDS.keys():
-        # NEW: LOOP OVER BOTH SPATIAL LAYOUTS
-        for layout in ['whole', 'roi']:
-            print(f"\n📡 FREQUENCY BAND: {band_name.upper()} | LAYOUT: {layout.upper()}")
+    for band_name, (l_freq, h_freq) in BANDS.items():
+        print(f"\n{'='*50}\n📡 FREQUENCY BAND: {band_name.upper()}\n{'='*50}")
+        
+        pipelines = {
+            'MDM_Cov': Pipeline([
+                ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
+                ('roi', ROIExtractor(ROI_INDICES)),
+                ('cov', Covariances(estimator='oas')),
+                ('mdm', MDM(metric=dict(mean='riemann', distance='riemann')))
+            ]),
+            'TSSVM_Cov': Pipeline([
+                ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
+                ('roi', ROIExtractor(ROI_INDICES)),
+                ('cov', Covariances(estimator='oas')),
+                ('ts', TangentSpace(metric='riemann')),
+                ('scaler', StandardScaler()),
+                ('svm', SVC(class_weight='balanced', probability=True, random_state=RANDOM_STATE))
+            ]),
+            'TSSVM_Xdawn': Pipeline([
+                ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
+                ('roi', ROIExtractor(ROI_INDICES)),
+                ('xdawn', XdawnCovariances(nfilter=6, estimator='oas')), 
+                ('ts', TangentSpace(metric='riemann')),
+                ('scaler', StandardScaler()),
+                ('svm', SVC(class_weight='balanced', probability=True, random_state=RANDOM_STATE))
+            ]),
+            'TSSVM_Coh': Pipeline([
+                ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
+                ('roi', ROIExtractor(ROI_INDICES)),
+                ('coh', Coherences(coh='lagged')),
+                ('spd', NearestSPD()),
+                ('ts', TangentSpace(metric='riemann')),
+                ('scaler', StandardScaler()),
+                ('svm', SVC(class_weight='balanced', probability=True, random_state=RANDOM_STATE))
+            ])
+        }
+
+        for p_name, pipe in pipelines.items():
+            print(f"  ⚙️ Evaluating Architecture: {p_name}")
             
-            # Load specific covariances for this band and layout
-            X_covs = np.load(RIEMANN_DATA_DIR / f"covs_train_{band_name}_{layout}.npy")
+            search = GridSearchCV(pipe, param_grid_svm, cv=cv_inner, scoring='balanced_accuracy', n_jobs=-1, verbose=2) if 'SVM' in p_name else pipe
+            fold_scores = []
             
-            for p_name, pipe in pipelines.items():
-                run_name = f"{p_name} | {band_name} | {layout}"
-                print(f"  ⚙️ Training: {p_name}...")
-                
-                y_true, y_pred, y_prob = [], [], []
-                
-                for train_idx, val_idx in cv.split(X_covs, y, groups):
-                    pipe.fit(X_covs[train_idx], y[train_idx])
-                    y_pred.extend(pipe.predict(X_covs[val_idx]))
+            # Voeg tqdm toe rond de outer splits
+            splits = list(cv_outer.split(X_raw, y, groups))
+            with tqdm(total=n_splits_outer, desc=f"    Processing Folds", unit="fold") as pbar:
+                for train_idx, val_idx in splits:
+                    if 'SVM' in p_name:
+                        search.fit(X_raw[train_idx], y[train_idx], groups=groups[train_idx])
+                        score = search.score(X_raw[val_idx], y[val_idx])
+                    else:
+                        search.fit(X_raw[train_idx], y[train_idx])
+                        score = balanced_accuracy_score(y[val_idx], search.predict(X_raw[val_idx]))
                     
-                    prob = pipe.predict_proba(X_covs[val_idx])[:, 1] if hasattr(pipe, "predict_proba") else pipe.predict(X_covs[val_idx])
-                    y_prob.extend(prob)
-                    y_true.extend(y[val_idx])
+                    fold_scores.append(score)
+                    pbar.update(1)
 
-                y_true, y_pred, y_prob = np.array(y_true), np.array(y_pred), np.array(y_prob)
-
-                sens = recall_score(y_true, y_pred, pos_label=1)
-                spec = recall_score(y_true, y_pred, pos_label=0)
-                bal_acc = (sens + spec) / 2
-                fpr, tpr, _ = roc_curve(y_true, y_prob)
-                roc_auc = auc(fpr, tpr)
+            mean_acc = np.mean(fold_scores)
+            param_log = str(search.best_params_) if 'SVM' in p_name else "N/A"
+            print(f"    ✅ Result -> Bal. Acc: {mean_acc:.4f} | Optimal Params: {param_log}\n")
+            
+            results.append({'Band': band_name.upper(), 'Architecture': p_name, 'CV_Balanced_Accuracy': mean_acc, 'Optimal_Params': param_log})
+            
+            if mean_acc > best_score:
+                best_score, best_model_name = mean_acc, f"model_riemann_{band_name}_{p_name}.pkl"
+                best_pipeline = search.best_estimator_ if 'SVM' in p_name else search
                 
-                results.append({
-                    'Band': band_name, 'Layout': layout, 'Model': p_name, 'Bal_Acc': bal_acc, 
-                    'Sens (Pain)': sens, 'Spec (HC)': spec, 'ROC_AUC': roc_auc
-                })
-                
-                plot_data['roc'][run_name] = {'fpr': fpr, 'tpr': tpr, 'auc': roc_auc}
-                plot_data['cm'][run_name] = confusion_matrix(y_true, y_pred)
+                # Fit final model silently without progress bar
+                best_pipeline.fit(X_raw, y)
 
-                print(f"     -> Bal. Acc: {bal_acc:.2%} | AUC: {roc_auc:.3f}")
-
-                # Save definitive model (THIS CONTAINS THE SVM WEIGHTS!)
-                pipe.fit(X_covs, y)
-                joblib.dump(pipe, PROCESSED_DATA_DIR / f"model_riemann_{band_name}_{layout}_{p_name.replace('-','')}.pkl")
-
-    # Save results
-    df_results = pd.DataFrame(results)
-    df_results.to_csv(RIEMANN_DATA_DIR / "riemann_multiband_layout_results.csv", index=False)
-    joblib.dump(plot_data, RIEMANN_DATA_DIR / "riemann_plot_data.pkl")
+    # Export & Freeze
+    pd.DataFrame(results).sort_values(by='CV_Balanced_Accuracy', ascending=False).to_csv(RIEMANN_DATA_DIR / "riemann_comprehensive_scoreboard.csv", index=False)
     
-    print("\n✅ Training complete! All bands and layouts processed.")
+    artifact_path = SVM_DATA_DIR / best_model_name
+    joblib.dump({'model': best_pipeline, 'band': best_model_name.split('_')[2], 'layout': 'roi', 'training_balanced_accuracy': best_score}, artifact_path)
+    print(f"\n{'='*70}\n🏆 OVERALL WINNER: {best_model_name} (Accuracy: {best_score:.4f})\nFrozen and saved to: svm_data/{artifact_path.name}\n{'='*70}")
 
 if __name__ == "__main__":
-    train_models()
+    run_comprehensive_band_selection()

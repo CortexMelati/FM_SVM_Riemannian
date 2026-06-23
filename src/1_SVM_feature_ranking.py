@@ -7,9 +7,9 @@ to generate the initial SHAP-ranking and to justify the choice for the
 Gamma ROI.
 
 Note: Because there are 855 features, the SHAP KernelExplainer 
-may take 5 to 15 minutes to run!
 
-python global_feature_ranking.py
+
+python 1_SVM_feature_ranking.py
 =============================================================================
 """
 
@@ -49,10 +49,16 @@ global_svm = SVC(kernel='rbf', gamma='scale', probability=True, random_state=RAN
 global_svm.fit(X_train_scaled, y_train)
 
 # 4. Calculate SHAP Values
-print("-> Calculating SHAP values across 855 features (This will take some time!)...")
+print("-> Calculating SHAP values across 855 features")
 # We use K-means (k=10) to create a background distribution to halve the computation time
-background = shap.kmeans(X_train_scaled, 10)
+background = shap.kmeans(X_train_scaled, 10) 
 explainer = shap.KernelExplainer(global_svm.predict_proba, background)
+# above gives variable results. If a seed needs to be installed:
+# Pass random_state to KMeans for strict reproducibility
+# from sklearn.cluster import KMeans
+# kmeans_model = KMeans(n_clusters=10, random_state=RANDOM_STATE, n_init='auto')
+# background = shap.kmeans(X_train_scaled, kmeans_model)
+
 
 # We sample the dataset to calculate the impact
 shap_values = explainer.shap_values(X_train_scaled)
@@ -64,7 +70,7 @@ elif len(np.array(shap_values).shape) == 3:
 else:
     shap_values_fm = np.array(shap_values)
 
-# 5. Extract the Top 10 Features
+# 5. Extract the Top 15 Features
 mean_abs_shap = np.abs(shap_values_fm).mean(axis=0)
 feature_names = X_train_scaled.columns
 feature_importance = pd.DataFrame({
@@ -72,19 +78,46 @@ feature_importance = pd.DataFrame({
     'Mean_Abs_SHAP': mean_abs_shap
 }).sort_values(by='Mean_Abs_SHAP', ascending=False)
 
-print("\nTOP 10 GLOBAL FEATURES (Compare this with Li et al. Section 3.1):")
-print(feature_importance.head(10).to_string(index=False))
+top_15_features = feature_importance.head(15)
 
-# 6. Horizontal Bar Plot (Figure 1 from the paper)
-plt.figure(figsize=(10, 8))
-# We only show the top 15 to keep it readable, exactly like Figure 1
-shap.summary_plot(shap_values_fm, X_train_scaled, plot_type="bar", max_display=15, show=False)
-plt.title("Initial Global Feature Ranking (Mean Absolute SHAP)")
+print("\nTOP 15 GLOBAL FEATURES:")
+print(top_15_features.to_string(index=False))
+
+# 6. Custom Horizontal Bar Plot (Figure 1 replication with data labels)
+# We recreate the SHAP summary plot manually to add the numerical values
+plt.figure(figsize=(12, 8))
+
+# Sort ascending purely for plotting (so the highest value is at the top)
+plot_df = top_15_features.sort_values(by='Mean_Abs_SHAP', ascending=True)
+
+# Create the horizontal bars (using the standard SHAP blue color)
+bars = plt.barh(plot_df['Feature'], plot_df['Mean_Abs_SHAP'], color='#1f77b4', height=0.6)
+
+# Add the numerical labels slightly to the right of each bar
+for bar in bars:
+    width = bar.get_width()
+    plt.text(width + 0.001,  # x-position (slightly to the right of the bar)
+             bar.get_y() + bar.get_height() / 2, # y-position (centered)
+             f"{width:.4f}", # format to 4 decimal places
+             ha='left', va='center', fontsize=10, color='black')
+
+# Styling to match typical academic plots
+plt.xlabel("Mean |SHAP value|", fontsize=12)
+plt.ylabel("Connectivity Feature", fontsize=12)
+
+# Remove top and right spines for a cleaner look
+ax = plt.gca()
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+
+# Extend x-axis slightly so the text labels don't get cut off
+current_xlim = ax.get_xlim()
+ax.set_xlim(current_xlim[0], current_xlim[1] * 1.15) 
+
 plt.tight_layout()
 plot_path = FIGURES_DIR / "Figure_1_Global_SHAP_Ranking.png"
 plt.savefig(plot_path, dpi=300, bbox_inches='tight')
 plt.close()
-
 # ====================================================================
 # Channel Importance ("Without the connections")
 # ====================================================================

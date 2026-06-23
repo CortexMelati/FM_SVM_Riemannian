@@ -1,162 +1,129 @@
 """
 =============================================================================
-3. VISUALISATIE & HERSENNETWERK (RIEMANNIAN MULTI-BAND)
+3. RIEMANNIAN BIOMARKER MAP (TOPOGRAPHY)
 =============================================================================
 Overview:
-    1. Genereert ROC-curves voor de Cross-Validatie (uit script 2).
-    2. Laadt het getrainde TS-SVM model voor een specifieke band.
-    3. Extraheert de SVM-gewichten en vertaalt de Tangent Space vector (190 features) 
-       terug naar de originele 19x19 kanaalparen.
-    4. Plot de top-5 netwerkconnecties op een topografische hersenkaart.
+    This script opens the winning Riemannian model (TSSVM), extracts the 
+    internal Linear SVM weights from the Tangent Space, maps them back to 
+    the original 9-channel ROI matrix, and plots the top 5 connectivity 
+    features on a standard 19-channel topographical brain map.
+
+Execution:
+    python 3_plot_riemann_results.py
 =============================================================================
 """
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 import mne
 import joblib
 from pathlib import Path
 import sys
 
-# Configuratie laden
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import PROCESSED_DATA_DIR, FIGURES_DIR, CHANNELS_1020, BANDS, RIEMANN_FIGURES_DIR
+from config import SVM_DATA_DIR, RIEMANN_FIGURES_DIR, BEST_CHANNELS_EVALUATE
 
-def plot_roc_curves():
-    """Generates a combined ROC curve plot using distinct colors and line styles for publication."""
-    print("🎨 Generating publication-ready ROC Curves...")
-    
-    plot_data_path = RIEMANN_DATA_DIR / "riemann_plot_data.pkl"
-    if not plot_data_path.exists():
-        raise FileNotFoundError("🚨 riemann_plot_data.pkl missing. Run script 2.")
+def plot_riemannian_weights():
+    # 1. ZOEK HET WINNENDE MODEL
+    model_files = list(SVM_DATA_DIR.glob("model_riemann_*.pkl"))
+    if not model_files:
+        print("🚨 Geen Riemannian model gevonden in svm_data/.")
+        sys.exit()
         
-    plot_data = joblib.load(plot_data_path)
-    roc_data = plot_data['roc']
+    # Pak het laatst opgeslagen model
+    model_path = model_files[-1]
+    band_name = model_path.stem.split('_')[2]
+    print(f"🚀 Genereren van Topografisch Netwerk voor TS-SVM ({band_name.upper()} Band)...")
+    
+    artifact = joblib.load(model_path)
+    # Handle both direct pipeline saves and dictionary saves
+    pipeline = artifact['model'] if isinstance(artifact, dict) else artifact
 
-    plt.figure(figsize=(8, 6))
-    
-    # Map each band to a unique combination of color and line style
-    styles = {
-        'DELTA':  {'color': '#1f77b4', 'linestyle': '-'},
-        'THETA':  {'color': '#ff7f0e', 'linestyle': '--'},
-        'ALPHA':  {'color': '#2ca02c', 'linestyle': '-.'},
-        'BETA':   {'color': '#d62728', 'linestyle': ':'},
-        'GAMMA':  {'color': '#9467bd', 'linestyle': (0, (3, 5, 1, 5))} # dashdotted
-    }
-    
-    for run_name, data in roc_data.items():
-        if 'TS-SVM' in run_name:
-            band = run_name.split(' | ')[1]
-            cfg = styles.get(band, {'color': '#000', 'linestyle': '-'})
-            plt.plot(data['fpr'], data['tpr'], lw=2.5, 
-                     color=cfg['color'], linestyle=cfg['linestyle'],
-                     label=f"{band} (AUC = {data['auc']:.3f})")
-    
-    plt.plot([0, 1], [0, 1], color='gray', lw=1.5, linestyle='--')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate', fontsize=12)
-    plt.ylabel('True Positive Rate', fontsize=12)
-    plt.title("ROC Curves - Tangent Space SVM per Frequency Band", fontsize=14, pad=15)
-    plt.legend(loc="lower right", fontsize=10)
-    plt.grid(True, alpha=0.2)
-    plt.tight_layout()
-    
-    save_path = RIEMANN_FIGURES_DIR / "riemann_multiband_roc.png"
-    plt.savefig(save_path, dpi=300)
-    plt.close()
-    print(f"  ✓ Publication-ready plot saved to: {save_path.name}")
-
-def plot_topographical_weights(target_band='BETA'):
-    """Vertaalt TS-SVM weights naar kanaalparen en plot de topografische kaart."""
-    print(f"\n🧠 Genereren van Topografisch Netwerk voor TS-SVM ({target_band})...")
-    
-    # 1. Laad het getrainde model
-    model_path = RIEMANN_DATA_DIR / f"model_riemann_{target_band}_TSSVM.pkl"
-    if not model_path.exists():
-        print(f"  ⚠️ Model {model_path.name} niet gevonden. Kan hersenkaart niet genereren.")
-        return
-        
-    model = joblib.load(model_path)
-    
-    # 2. Haal de gewichten uit de Lineaire SVM
+    # 2. HAAL DE GEWICHTEN UIT DE TANGENT SPACE SVM
     try:
-        # TS-SVM pipeline: [covariances, ts, scaler, svm]
-        svm_coefs = model.named_steps['svm'].coef_[0] 
+        svm_coefs = pipeline.named_steps['svm'].coef_[0] 
     except (AttributeError, KeyError):
-        print("  ⚠️ Kan geen lineaire SVM coëfficiënten vinden in dit model.")
-        return
+        print("🚨 Kan geen lineaire SVM coëfficiënten vinden in dit model.")
+        sys.exit()
 
-    # 3. Reconstrueer de index-mapping van PyRiemann's Tangent Space
-    # TangentSpace zet de bovenste driehoek (upper triangle) van de covariantiematrix 
-    # om naar een 1D vector, exact in deze volgorde:
-    n_channels = len(CHANNELS_1020)
+    # 3. RECONSTRUEER DE TANGENT SPACE INDEXERING (Voor de 9 ROI kanalen)
+    roi_channels = BEST_CHANNELS_EVALUATE
+    n_channels = len(roi_channels)
     pair_map = []
+    
     for i in range(n_channels):
         for j in range(i, n_channels):
-            pair_map.append((CHANNELS_1020[i], CHANNELS_1020[j]))
-            
-    if len(svm_coefs) != len(pair_map):
-        print(f"  ⚠️ Dimensie mismatch: SVM heeft {len(svm_coefs)} features, layout verwacht {len(pair_map)}.")
-        return
+            pair_map.append((roi_channels[i], roi_channels[j]))
 
-    # 4. Koppel de absolute gewichten aan de paren en filter diagonale waarden (variantie) eruit
+    if len(svm_coefs) != len(pair_map):
+        print(f"🚨 Dimensie mismatch! TS-SVM heeft {len(svm_coefs)} features, verwachtte er {len(pair_map)}.")
+        sys.exit()
+
+    # 4. KOPPEL EN FILTER DE GEWICHTEN
     weights_df = pd.DataFrame({
-        'Pair': pair_map,
-        'Weight': np.abs(svm_coefs),
         'Node1': [p[0] for p in pair_map],
-        'Node2': [p[1] for p in pair_map]
+        'Node2': [p[1] for p in pair_map],
+        'Weight': np.abs(svm_coefs)
     })
     
-    # We plotten alleen connecties (node1 != node2), geen auto-varianties
+    # Filter variantie op hetzelfde kanaal (we willen connectiviteit)
     weights_df = weights_df[weights_df['Node1'] != weights_df['Node2']]
     
-    # Selecteer de top 5 sterkste connecties
+    # Top 5
     top_5 = weights_df.sort_values(by='Weight', ascending=False).head(5)
     
-    print("  -> Top 5 geïdentificeerde verbindingen (TS-SVM Weights):")
+    print("\n-> Top 5 Riemannian Connecties (Tangent Space Weights):")
     for _, row in top_5.iterrows():
-        print(f"     {row['Node1']:<4} - {row['Node2']:<4} | Gewicht: {row['Weight']:.4f}")
+        print(f"   {row['Node1']:<3} - {row['Node2']:<3} | Gewicht: {row['Weight']:.4f}")
 
-    # 5. Teken de MNE Topografie
+    # 5. MNE TOPOGRAFIE TEKENEN (Stijl van Figuur 4)
+    standard_19 = ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T7', 'C3', 'Cz', 'C4', 'T8', 'P7', 'P3', 'Pz', 'P4', 'P8', 'O1', 'O2']
     montage = mne.channels.make_standard_montage('standard_1020')
-    info = mne.create_info(ch_names=CHANNELS_1020, sfreq=500, ch_types='eeg')
+    info = mne.create_info(ch_names=standard_19, sfreq=500, ch_types='eeg')
     info.set_montage(montage)
 
-    fig, ax = plt.subplots(figsize=(6, 6))
+    fig, ax = plt.subplots(figsize=(8, 8))
     mne.viz.plot_sensors(info, show_names=True, axes=ax)
     
-    # Styling van de sensoren
     for collection in ax.collections:
-        collection.set_sizes([300])
-        collection.set_edgecolor('black')
+        collection.set_sizes([600])
+        collection.set_facecolor('white')
+        collection.set_edgecolor('#cccccc')
         collection.set_linewidth(1.5)
         
     sensor_offsets = ax.collections[0].get_offsets()
     ch_pos = {ch: (sensor_offsets[i, 0], sensor_offsets[i, 1]) for i, ch in enumerate(info.ch_names)}
 
-    # Teken de lijnen, dikte gebaseerd op het genormaliseerde gewicht
     max_weight = top_5['Weight'].max()
-    for _, row in top_5.iterrows():
-        x_coords = [ch_pos[row['Node1']][0], ch_pos[row['Node2']][0]]
-        y_coords = [ch_pos[row['Node1']][1], ch_pos[row['Node2']][1]]
-        
-        lijn_dikte = (row['Weight'] / max_weight) * 5.0
-        ax.plot(x_coords, y_coords, color='#d62728', linewidth=lijn_dikte, zorder=1)
+    top_5['Scaled_Importance'] = (top_5['Weight'] / max_weight) * 2.5
 
-    ax.set_title(f"Sterkste Riemannian Connecties\n(TS-SVM - {target_band.upper()} Band)", fontsize=14, pad=20)
+    for _, row in top_5.iterrows():
+        try:
+            x_coords = [ch_pos[row['Node1']][0], ch_pos[row['Node2']][0]]
+            y_coords = [ch_pos[row['Node1']][1], ch_pos[row['Node2']][1]]
+            
+            scaled_val = row['Scaled_Importance']
+            if scaled_val >= 2.0:
+                color, lw = '#FF8C94', 5.0  # Roze
+            elif scaled_val >= 1.0:
+                color, lw = '#8B4513', 3.5  # Bruin
+            else:
+                color, lw = '#228B22', 2.0  # Groen
+                
+            ax.plot(x_coords, y_coords, color=color, linewidth=lw, alpha=0.9, zorder=0)
+        except KeyError:
+            pass
+
+    ax.set_title(f"Riemannian TS-SVM Connectivity\n({band_name.upper()} Band - ROI)", fontsize=14, pad=20)
     plt.tight_layout()
     
-    save_path = RIEMANN_FIGURES_DIR / f"riemann_topography_{target_band.lower()}.png"
-    plt.savefig(save_path, dpi=300)
+    RIEMANN_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    save_path = RIEMANN_FIGURES_DIR / f"Figure_Riemann_Network_{band_name}.png"
+    plt.savefig(save_path, dpi=300, transparent=True)
     plt.close()
-    print(f"  ✓ Opgeslagen: {save_path.name}")
+    print(f"\n✅ Hersenkaart opgeslagen: riemann_figures/{save_path.name}")
 
 if __name__ == "__main__":
-    plot_roc_curves()
-    
-    # Pas de frequentieband hier aan naar de band die het best presteerde in je testset.
-    plot_topographical_weights(target_band='BETA')
+    plot_riemannian_weights()

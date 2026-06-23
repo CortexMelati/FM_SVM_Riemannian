@@ -30,10 +30,10 @@ import joblib
 # ==========================================
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import RESULTS_DIR, PROCESSED_DATA_DIR, FIGURES_DIR, SVM_FIGURES_DIR
-from config import USE_ROI, PREFIX
+# FIX: Imported SVM_DATA_DIR and FOCUS_BAND
+from config import PROCESSED_DATA_DIR, SVM_DATA_DIR, SVM_FIGURES_DIR, USE_ROI, PREFIX, FOCUS_BAND
 
-def plot_svm_network_map(shap_values_fm, X_test_final, target_band='gamma'):
+def plot_svm_network_map(shap_values_fm, X_test_final, target_band):
     """
     Replicates Figure 4 from Li et al. (Topographical Network Map).
     Maps the top 5 connectivity features based on their mean absolute SHAP values
@@ -96,14 +96,15 @@ def plot_svm_network_map(shap_values_fm, X_test_final, target_band='gamma'):
     print(f"  -> SVM Network Map (Fig 4 Replication) saved to: {save_path.name}")
 
 
-def run_shap_analysis(target_band='gamma'): # Amend to the band needed? 
+def run_shap_analysis(target_band):
     print(f"\nStarting SHAP Analysis for the {target_band.upper()} band...")
     
     # 1. Load the frozen model artifact using centralized config logic
-    model_path = PROCESSED_DATA_DIR / f"saved_model_{PREFIX}{target_band}.pkl"
+    # FIX: Pointed to SVM_DATA_DIR instead of PROCESSED_DATA_DIR
+    model_path = SVM_DATA_DIR / f"saved_model_{PREFIX}{target_band}.pkl"
     
     if not model_path.exists():
-        raise FileNotFoundError(f"Error: Model {model_path.name} not found. Run train_svm.py first.")
+        raise FileNotFoundError(f"Error: Model {model_path.name} not found in {SVM_DATA_DIR.name}. Run train_svm.py first.")
         
     artifact = joblib.load(model_path)
     final_svm = artifact['model']
@@ -171,7 +172,6 @@ if __name__ == "__main__":
     # Set to True to run all 5 bands automatically, or False to only run one.
     # =========================================================================
     RUN_ALL_BANDS = False 
-    TARGET_BAND = 'gamma' # Used if RUN_ALL_BANDS is False
 
     if RUN_ALL_BANDS:
         all_bands = ['delta', 'theta', 'alpha', 'beta', 'gamma']
@@ -181,4 +181,5 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"  Warning: Could not complete SHAP analysis for the {band.upper()} band. Error: {e}")
     else:
-        run_shap_analysis(target_band=TARGET_BAND)
+        # FIX: Directly utilizing FOCUS_BAND from config.py
+        run_shap_analysis(target_band=FOCUS_BAND)

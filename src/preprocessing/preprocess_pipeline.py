@@ -363,7 +363,7 @@ if __name__ == "__main__":
                 
             filename = os.path.basename(f)
             
-            # Skip NCCP subjects explicitly
+            # Skip cbp subjects explicitly
             if 'cbp' in filename.lower():
                 continue
             
@@ -371,7 +371,7 @@ if __name__ == "__main__":
             if assign_label_from_filename(filename):
                 valid_found.append(f)
             
-        print(f"  -> Files remaining after filtering (valid labels & without NCCP): {len(valid_found)}")
+        print(f"  -> Files remaining after filtering (valid labels & without CBP): {len(valid_found)}")
         
         # If limiting the number of subjects, sample randomly
         if NUM_SUBJECTS_TO_PROCESS is not None and len(valid_found) > 0:
