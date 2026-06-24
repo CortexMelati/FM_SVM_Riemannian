@@ -105,14 +105,19 @@ print(f"-> Added 10 remaining ROI features to create the search pool.")
 print(f"-> Search space strictly constrained to {len(X_train_roi.columns)} features.")
 
 # =============================================================================
-# 2. SCALING & STRATIFIED GROUP K-FOLD
+# 2. SCALING & REPEATED STRATIFIED GROUP K-FOLD (5 Folds x 10 Repeats)
 # =============================================================================
 scaler = StandardScaler()
 X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train_roi), columns=X_train_roi.columns)
 
-n_folds = 5
-cv_strategy = StratifiedGroupKFold(n_splits=n_folds) 
-cv_splits = list(cv_strategy.split(X_train_scaled, y_train, groups=groups_train))
+cv_splits = []
+# We herhalen de 5-fold splitsing 10 keer met een verschuivende random state
+for seed_offset in range(10): 
+    cv_strategy = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE + seed_offset)
+    cv_splits.extend(list(cv_strategy.split(X_train_scaled, y_train, groups=groups_train)))
+
+print(f"-> Created {len(cv_splits)} cross-validation folds (10 repeats of 5-fold CV).")
+
 
 # =============================================================================
 # 3. mSFFS ALGORITHM

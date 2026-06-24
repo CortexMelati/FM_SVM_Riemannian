@@ -12,6 +12,8 @@ Overview:
 
     For the SVM architectures, it utilizes GridSearchCV to empirically select 
     the optimal Kernel ('linear' vs 'rbf') and Regularization parameter (C).
+    
+    !! training takes a long time. Best version will be kept.
 
 Execution:
     python 2_train_riemann.py
@@ -49,6 +51,12 @@ except ImportError:
             def fit(self, X, y=None): return self
             def transform(self, X): return np.array([nearest_sym_pos_def(x) for x in X])
 
+
+
+import warnings
+# Voeg dit toe bovenaan je script:
+warnings.filterwarnings("ignore", message="DC and Nyquist bins are not defined*")
+
 # Ensure central config logic is imported
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
@@ -70,6 +78,14 @@ class ROIExtractor(BaseEstimator, TransformerMixin):
     def __init__(self, indices): self.indices = indices
     def fit(self, X, y=None): return self
     def transform(self, X): return X[:, self.indices, :]
+
+class AverageFrequencies(BaseEstimator, TransformerMixin):
+    """Slaat de 3D Coherence output (kanalen x kanalen x frequenties) plat naar een 2D matrix"""
+    def fit(self, X, y=None): return self
+    def transform(self, X):
+        # Als de output 4D is (epochs, channels, channels, frequencies), neem dan het gemiddelde over de frequenties
+        return np.mean(X, axis=-1) if X.ndim == 4 else X
+
 
 def run_comprehensive_band_selection():
     print("🚀 STARTING STEP 2: UNIFIED RIEMANNIAN TRAINING & GRID SEARCH")
@@ -124,6 +140,7 @@ def run_comprehensive_band_selection():
                 ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
                 ('roi', ROIExtractor(ROI_INDICES)),
                 ('coh', Coherences(coh='lagged')),
+                ('avg_freq', AverageFrequencies()), # <--- DEZE NIEUWE STAP PERST HEM PLAT!
                 ('spd', NearestSPD()),
                 ('ts', TangentSpace(metric='riemann')),
                 ('scaler', StandardScaler()),
@@ -171,5 +188,24 @@ def run_comprehensive_band_selection():
     joblib.dump({'model': best_pipeline, 'band': best_model_name.split('_')[2], 'layout': 'roi', 'training_balanced_accuracy': best_score}, artifact_path)
     print(f"\n{'='*70}\n🏆 OVERALL WINNER: {best_model_name} (Accuracy: {best_score:.4f})\nFrozen and saved to: svm_data/{artifact_path.name}\n{'='*70}")
 
+    log_text = (
+        f"====================================================\n"
+        f" RIEMANNIAN TRAINING LOG (BEST MODEL) \n"
+        f"====================================================\n"
+        f"Winning Architecture:  {best_model_name.replace('.pkl', '')}\n"
+        f"Frequency Band:        {best_model_name.split('_')[2]}\n"
+        f"Balanced Accuracy:     {best_score:.4f}\n"
+        f"Optimal Parameters:    {search.best_params_ if hasattr(search, 'best_params_') else 'N/A'}\n"
+        f"Feature Extraction:    Covariance / Coherence -> Tangent Space Projection\n"
+        f"Cross-Validation:      5-Fold Stratified Group CV\n"
+        f"====================================================\n"
+    )
+    
+    log_path = SVM_DATA_DIR / f"riemann_training_report_{best_model_name.split('_')[2]}.txt"
+    with open(log_path, "w") as f:
+        f.write(log_text)
+    print(f"-> Logboek succesvol opgeslagen in: svm_data/{log_path.name}")
+    
+    
 if __name__ == "__main__":
     run_comprehensive_band_selection()
