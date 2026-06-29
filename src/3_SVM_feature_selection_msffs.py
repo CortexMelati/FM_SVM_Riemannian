@@ -157,6 +157,7 @@ for k in range(1, len(metric_dict) + 1):
     fold_scores = metric_dict[k]['cv_scores']
     mean_acc = np.mean(fold_scores)
     std_acc = np.std(fold_scores)
+    n_folds = 50
     
     # Calculate 95% Confidence Interval
     ci_margin = 1.96 * (std_acc / np.sqrt(n_folds))

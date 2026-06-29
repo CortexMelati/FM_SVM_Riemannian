@@ -103,8 +103,9 @@ def process_source_domain():
 
     print(f"  📊 Train Tensor: {X_train.shape} | Test Tensor: {X_test.shape}")
 
-    # Save base labels and RAW TRAIN DATA for Coherence testing later
+    # Save base labels and RAW DATA
     np.save(RIEMANN_DATA_DIR / "X_train_raw.npy", X_train)
+    np.save(RIEMANN_DATA_DIR / "X_test_raw.npy", X_test)  
     np.save(RIEMANN_DATA_DIR / "y_train_riemann.npy", y_train)
     np.save(RIEMANN_DATA_DIR / "groups_train_riemann.npy", groups_train)
     np.save(RIEMANN_DATA_DIR / "y_test_riemann.npy", y_test)

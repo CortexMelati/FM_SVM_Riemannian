@@ -3,7 +3,7 @@
 5. RIEMANNIAN MODEL BIAS EVALUATION (Demographic Confounding Check)
 =============================================================================
 Overview:
-    This script evaluates the frozen Riemannian model (Delta TSSVM) for 
+    This script evaluates the frozen Riemannian model for 
     potential demographic bias across age groups and biological sex on the 
     unseen test set. It mirrors the evaluation protocol applied to the SVM.
 

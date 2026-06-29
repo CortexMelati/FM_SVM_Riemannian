@@ -98,7 +98,7 @@ def run_comprehensive_band_selection():
     y = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
     groups = np.load(RIEMANN_DATA_DIR / "groups_train_riemann.npy")
 
-    param_grid_svm = {'svm__kernel': ['linear', 'rbf'], 'svm__C': [0.01, 0.1, 1, 10, 100]}
+    param_grid_svm = {'svm__kernel': ['rbf'], 'svm__C': [0.1, 1, 10]}
     
     # K-Folds instellen (5 outer folds)
     n_splits_outer = 5
@@ -114,12 +114,12 @@ def run_comprehensive_band_selection():
         print(f"\n{'='*50}\n📡 FREQUENCY BAND: {band_name.upper()}\n{'='*50}")
         
         pipelines = {
-            'MDM_Cov': Pipeline([
-                ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
-                ('roi', ROIExtractor(ROI_INDICES)),
-                ('cov', Covariances(estimator='oas')),
-                ('mdm', MDM(metric=dict(mean='riemann', distance='riemann')))
-            ]),
+            # 'MDM_Cov': Pipeline([
+            #     ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
+            #     ('roi', ROIExtractor(ROI_INDICES)),
+            #     ('cov', Covariances(estimator='oas')),
+            #     ('mdm', MDM(metric=dict(mean='riemann', distance='riemann')))
+            # ]),
             'TSSVM_Cov': Pipeline([
                 ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
                 ('roi', ROIExtractor(ROI_INDICES)),
@@ -136,16 +136,16 @@ def run_comprehensive_band_selection():
                 ('scaler', StandardScaler()),
                 ('svm', SVC(class_weight='balanced', probability=True, random_state=RANDOM_STATE))
             ]),
-            'TSSVM_Coh': Pipeline([
-                ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
-                ('roi', ROIExtractor(ROI_INDICES)),
-                ('coh', Coherences(coh='lagged')),
-                ('avg_freq', AverageFrequencies()), # <--- DEZE NIEUWE STAP PERST HEM PLAT!
-                ('spd', NearestSPD()),
-                ('ts', TangentSpace(metric='riemann')),
-                ('scaler', StandardScaler()),
-                ('svm', SVC(class_weight='balanced', probability=True, random_state=RANDOM_STATE))
-            ])
+            # 'TSSVM_Coh': Pipeline([
+            #     ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
+            #     ('roi', ROIExtractor(ROI_INDICES)),
+            #     ('coh', Coherences(coh='lagged')),
+            #     ('avg_freq', AverageFrequencies()), # <--- DEZE NIEUWE STAP PERST HEM PLAT!
+            #     ('spd', NearestSPD()),
+            #     ('ts', TangentSpace(metric='riemann')),
+            #     ('scaler', StandardScaler()),
+            #     ('svm', SVC(class_weight='balanced', probability=True, random_state=RANDOM_STATE))
+            # ])
         }
 
         for p_name, pipe in pipelines.items():
