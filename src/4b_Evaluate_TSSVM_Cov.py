@@ -1,6 +1,6 @@
 """
 =============================================================================
-4b. QUICK EVALUATE SECOND-BEST MODEL (TSSVM_Cov)
+4b. QUICK EVALUATE SECOND-BEST MODEL (TSSVM_Cov) Riemannian
 =============================================================================
 Overview:
     Trains the specific TSSVM_Cov configuration (Theta, C=1, RBF) directly

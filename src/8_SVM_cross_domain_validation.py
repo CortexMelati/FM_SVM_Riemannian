@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import sys
 from pathlib import Path
 import joblib
+import seaborn as sns
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning) # Suppresses adapt library warnings
 
@@ -30,6 +31,7 @@ from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import balanced_accuracy_score, confusion_matrix
 
 # Ensure the ADAPT library is installed for TrAdaBoost
 try:
@@ -94,17 +96,23 @@ X_target = scaler.transform(target_df[selected_features])
 y_target = target_df['Target'].values
 groups_target = target_df['Subject'].values
 
-unique_target_subjects = len(np.unique(groups_target))
+# unique_target_subjects = len(np.unique(groups_target))
 
 # =============================================================================
 # 3. FIGURE 7 ITERATIVE EXPERIMENT (2 to N Folds)
 # =============================================================================
-# The paper varies the number of folds to simulate increasing calibration data
-# They used 2 to 24 folds. We will dynamically adapt to your dataset size.
-max_folds = min(24, unique_target_subjects) 
-fold_range = range(2, max_folds + 1)
+class_subject_counts = target_df.groupby('Target')['Subject'].nunique()
+min_class_subjects = class_subject_counts.min()
+
+max_safe_folds = min_class_subjects
+fold_range = range(2, max_safe_folds + 1)
 
 results = []
+
+# --- NIEUW: Opslag voor de uiteindelijke Confusion Matrix ---
+final_y_true = []
+final_y_pred_transfer = []
+final_subjects = []
 
 print("\nRunning iterative cross-domain testing (This may take a few minutes)...")
 print(f"{'Folds':<10} | {'Avg Train Subjects':<20} | {'Transfer Acc':<15} | {'Direct Acc':<15}")
@@ -121,28 +129,32 @@ for n_splits in fold_range:
         X_tgt_tr, y_tgt_tr = X_target[train_idx], y_target[train_idx]
         X_tgt_te, y_tgt_te = X_target[test_idx], y_target[test_idx]
         
-        # Track number of unique subjects used for training in this fold
         num_subjects_in_fold = len(np.unique(groups_target[train_idx]))
         train_subjects_count.append(num_subjects_in_fold)
         
-        # Method 1: DIRECT TRAINING (New model on Target data only)
-        # Using the same hyperparameters discovered during source optimization
+        # Method 1: DIRECT TRAINING
         direct_svm = SVC(C=frozen_svm.C, gamma=frozen_svm.gamma, kernel='rbf', random_state=RANDOM_STATE)
         direct_svm.fit(X_tgt_tr, y_tgt_tr)
-        acc_direct = accuracy_score(y_tgt_te, direct_svm.predict(X_tgt_te))
+        acc_direct = balanced_accuracy_score(y_tgt_te, direct_svm.predict(X_tgt_te))
         direct_scores.append(acc_direct)
         
         # Method 2: TRANSFER LEARNING (TrAdaBoost)
-        # Uses both Source Data + Target Training Data to predict Target Test Data
         boost_base = SVC(C=frozen_svm.C, gamma=frozen_svm.gamma, kernel='rbf', probability=True, random_state=RANDOM_STATE)
-        # Note: Using 10 estimators for speed. Paper uses standard TrAdaBoost config.
         tr_model = TrAdaBoost(estimator=boost_base, n_estimators=10, random_state=RANDOM_STATE)
         
-        # X_source, y_source = Source domain. Xt, yt = Target calibration domain.
         tr_model.fit(X_source, y_source, Xt=X_tgt_tr, yt=y_tgt_tr)
-        acc_transfer = accuracy_score(y_tgt_te, tr_model.predict(X_tgt_te))
+        
+        # Voorspel met TrAdaBoost
+        tgt_pred = tr_model.predict(X_tgt_te)
+        acc_transfer = balanced_accuracy_score(y_tgt_te, tgt_pred)
         transfer_scores.append(acc_transfer)
         
+        if n_splits == max_safe_folds:
+            final_y_true.extend(y_tgt_te)
+            final_y_pred_transfer.extend(tgt_pred)
+            final_subjects.extend(groups_target[test_idx])
+            
+            
     avg_train_subs = np.mean(train_subjects_count)
     mean_transfer = np.mean(transfer_scores)
     mean_direct = np.mean(direct_scores)
@@ -199,3 +211,44 @@ plt.close()
 print(f"\n-> Table 1 Exported to: svm_data/{table_path.name}")
 print(f"-> Figure 7 Exported to: svm_figures/{fig_path.name}")
 print("PIPELINE COMPLETE.")
+
+
+# =============================================================================
+# 5. PLOT CROSS-DOMAIN CONFUSION MATRIX (SUBJECT-LEVEL / MAJORITY VOTE)
+# =============================================================================
+print("\n-> Applying Majority Voting for Subject-Level Clinical Evaluation...")
+
+# 1. Bundel de losse segmenten in een DataFrame
+df_preds = pd.DataFrame({
+    'Subject': final_subjects,
+    'True_Label': final_y_true,
+    'Pred_Label': final_y_pred_transfer
+})
+
+# 2. Bereken de 'Majority Vote' per proefpersoon
+df_subject = df_preds.groupby('Subject').agg(
+    True_Label=('True_Label', 'first'), # Het ware label is voor elk segment van deze patiënt hetzelfde
+    Pred_Label=('Pred_Label', lambda x: x.mode()[0]) # De meest voorkomende voorspelling wint
+).reset_index()
+
+print(f"-> Subject-level evaluatie uitgevoerd op {len(df_subject)} unieke proefpersonen.")
+
+# 3. Bereken de nieuwe, klinische Confusion Matrix
+cm_subject = confusion_matrix(df_subject['True_Label'], df_subject['Pred_Label'])
+
+plt.figure(figsize=(6, 5))
+sns.heatmap(cm_subject, annot=True, fmt='d', cmap='Reds',
+            xticklabels=['Healthy (0)', 'Patient (1)'], 
+            yticklabels=['Healthy (0)', 'Patient (1)'],
+            annot_kws={"size": 16})
+
+plt.title(f'Subject-Level Transfer Validation\n({CROSS_TARGET_DATASET} - {FOCUS_BAND.upper()} Band)', fontsize=14)
+plt.ylabel('True Clinical Diagnosis', fontsize=12)
+plt.xlabel('TrAdaBoost Majority Vote', fontsize=12)
+plt.tight_layout()
+
+cm_path = SVM_FIGURES_DIR / f"Figure_Cross_Domain_Subject_CM_{FOCUS_BAND}.png"
+plt.savefig(cm_path, dpi=300, facecolor='white', bbox_inches='tight')
+plt.close()
+
+print(f"-> Subject-Level Confusion Matrix Exported to: svm_figures/{cm_path.name}")

@@ -83,9 +83,10 @@ def train_all_svm_models():
         print("-> Commencing GridSearchCV for C and gamma optimization...")
 
         param_grid = {
-            'C': [0.01, 0.1, 1, 10],  
-            'gamma': ['scale'], #np.logspace(-4, 1.5, 20),
-            'class_weight': ['balanced'] # FORCED BALANCED: Prevents lazy majority voting
+            # C can also be logspace for better tuning: np.logspace(-2, 2, 5)
+            'C': [0.01, 0.1, 1, 10],
+            'gamma': np.logspace(-4, 1.5, 20), 
+            'class_weight': ['balanced'] 
         }
 
         base_svm = SVC(kernel='rbf', probability=True, random_state=RANDOM_STATE)
@@ -106,6 +107,15 @@ def train_all_svm_models():
         print(f"-> Best Parameters: {grid_search.best_params_}")
         print(f"-> Final Internal CV Balanced Accuracy: {grid_search.best_score_:.4f}")
 
+
+        # cv_results_ (instead of best_params_) shows results of each split in an ndarray for a pandas dataframe
+        # The key 'params' is used to store a list of parameter settings dicts for all the parameter candidates.
+        # The mean_fit_time, std_fit_time, mean_score_time and std_score_time are all in seconds.
+        # For multi-metric evaluation, the scores for all the scorers are available in the cv_results_ dict 
+        # at the keys ending with that scorer’s name ('_<scorer_name>') instead of '_score' shown above. 
+        # (‘split0_test_precision’, ‘mean_train_precision’ etc.)
+        
+        
         # =============================================================================
         # 5. PERMUTATION TEST
         # =============================================================================

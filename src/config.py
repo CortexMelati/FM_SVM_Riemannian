@@ -8,6 +8,7 @@ config.py
 import os
 from pathlib import Path
 
+
 # ==========================================
 # 1. PATH CONFIGURATION
 # ==========================================
@@ -71,8 +72,6 @@ FOCUS_BAND = 'beta' # change to the best band from 1_SVM_feature_ranking
 # Internal Cross-Domain Validation cohorts (matched with participants.tsv 'study' column)
 CROSS_SOURCE_DATASET = "FM"    # Primary cohort for Train/Test
 CROSS_TARGET_DATASET = "NCCP"  # Isolated cohort for Transfer Learning
-
-
 
 # ==========================================
 # 2. PREPROCESSING & TIMING PARAMETERS (Li et al., 2026)
@@ -157,7 +156,7 @@ MT_BANDWIDTH = 4.0 # 4 = standard, 2 = more precise (more noise),
 # 6. MACHINE LEARNING & VISUALIZATION METRICS
 # ==============================================================================
 RANDOM_STATE = 42
-TEST_SIZE = 0.2 # paper uses 0.1 
+TEST_SIZE = 0.2 # paper uses 0.1 but our dataset is limited
 MIN_AGE = 18.0
 
 

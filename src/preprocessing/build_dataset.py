@@ -1,6 +1,6 @@
 """
 =============================================================================
-DATASET AGGREGATION & TRAIN/TEST SPLIT (Li et al., 2026 Methodology)
+2. DATASET AGGREGATION & TRAIN/TEST SPLIT (Li et al., 2026 Methodology)
 =============================================================================
 Overview:
     Aggregates feature files, identifies the study cohort via participants.tsv,
@@ -147,6 +147,13 @@ sampled_test_data = []
 for subject, group in test_df.groupby('Subject'):
     if len(group) >= 5:
         sampled_test_data.append(group.sort_values('Segment').head(5))
+        
+        
+# # Hold-out testset (Strictly max 5 segments per subject), if the dataset contains less than a 5 minute block, use this
+# sampled_test_data = []
+# for subject, group in test_df.groupby('Subject'):
+#     # Pakt maximaal 5 segmenten. Als het er 3 zijn, pakt hij er 3.
+#     sampled_test_data.append(group.sort_values('Segment').head(5))
 
 test_df_final = pd.concat(sampled_test_data).sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
 

@@ -1,6 +1,6 @@
 """
 =============================================================================
-EEG PREPROCESSING PIPELINE (Li et al., 2026)
+1. EEG PREPROCESSING PIPELINE (Li et al., 2026)
 =============================================================================
 Overview:
     This script performs the preprocessing pipeline based strictly on the 
@@ -202,6 +202,9 @@ def extract_connectivity_features(epochs, subject_id, condition, segment_idx):
     return pd.DataFrame([features])
 
 def process_subject(file_path, output_dir, dataset_name):
+    
+    
+    
     filename = os.path.basename(file_path)
     
     # 1. Dynamic Label Check instead of hardcoded strings
@@ -210,7 +213,11 @@ def process_subject(file_path, output_dir, dataset_name):
         return False, f"Skipped (No label in config.py for {filename})"
         
     condition = get_condition(filename)
-    subject_id = filename.split('_')[0] 
+    
+    if condition == 'EO':
+        return False, "Skipped (Eyes Open condition explicitly excluded)"
+        
+    subject_id = filename.split('_')[0]
     
     # Create structured subfolders based on dataset and condition
     sub_folder = os.path.join(dataset_name, subject_group)
@@ -230,10 +237,11 @@ def process_subject(file_path, output_dir, dataset_name):
         missing = [ch for ch in COMMON_CHANNELS if ch not in available]
         if missing: return False, f"Missing core channels: {missing}"
         
+        raw.set_eeg_reference('average', projection=False, verbose=False)
+        
         raw.pick_channels(COMMON_CHANNELS)
         montage = mne.channels.make_standard_montage('standard_1020')
         raw.set_montage(montage, on_missing='ignore')
-        raw.set_eeg_reference('average', projection=False, verbose=False)
 
         if raw.times[-1] <= 10.0: return False, "Recording too short (<= 10s)"
         
@@ -244,7 +252,11 @@ def process_subject(file_path, output_dir, dataset_name):
         raw.crop(tmin=10.0, tmax=None)
         
         raw.notch_filter(NOTCH_FREQ, verbose=False) 
-        raw.filter(l_freq=FILTER_HP, h_freq=FILTER_LP, verbose=False)
+        raw.filter(l_freq=FILTER_HP, 
+                   h_freq=FILTER_LP, 
+                   method='iir',
+                   iir_params=dict(order=4, ftype='butter', output='sos'),
+                   verbose=False)
         
         sfreq = SFREQ_MAP.get(dataset_name, 500)
         if raw.info['sfreq'] != sfreq: raw.resample(sfreq, verbose=False)

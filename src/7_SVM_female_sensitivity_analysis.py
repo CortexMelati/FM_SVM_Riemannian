@@ -23,6 +23,7 @@ import joblib
 from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.metrics import balanced_accuracy_score
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
@@ -120,8 +121,10 @@ for fold, (train_idx, val_idx) in enumerate(cv_splits):
     X_val, y_val = X_female_scaled.iloc[val_idx], y_female[val_idx]
     
     sensitivity_svm.fit(X_tr, y_tr)
-    # Replicate balanced accuracy metric to remain consistent
-    score = sensitivity_svm.score(X_val, y_val)
+    
+    y_pred = sensitivity_svm.predict(X_val)
+    score = balanced_accuracy_score(y_val, y_pred)
+    
     fold_scores.append(score)
     print(f"   Fold {fold + 1}: Balanced Accuracy = {score:.4f}")
 

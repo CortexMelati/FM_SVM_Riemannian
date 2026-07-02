@@ -22,12 +22,13 @@ from pathlib import Path
 import sys
 from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import RESULTS_DIR, RANDOM_STATE, PROCESSED_DATA_DIR, FIGURES_DIR
 
-print("Starting Global Feature Ranking (Section 3.1)...")
+print("Starting Global Feature Ranking")
 
 # 1. Load the full training set
 train_path = PROCESSED_DATA_DIR / "final_dataset_train.csv"
@@ -53,12 +54,8 @@ print("-> Calculating SHAP values across 855 features")
 # We use K-means (k=10) to create a background distribution to halve the computation time
 background = shap.kmeans(X_train_scaled, 10) 
 explainer = shap.KernelExplainer(global_svm.predict_proba, background)
-# above gives variable results. If a seed needs to be installed:
-# Pass random_state to KMeans for strict reproducibility
-# from sklearn.cluster import KMeans
-# kmeans_model = KMeans(n_clusters=10, random_state=RANDOM_STATE, n_init='auto')
-# background = shap.kmeans(X_train_scaled, kmeans_model)
 
+np.random.seed(RANDOM_STATE)
 
 # We sample the dataset to calculate the impact
 shap_values = explainer.shap_values(X_train_scaled)

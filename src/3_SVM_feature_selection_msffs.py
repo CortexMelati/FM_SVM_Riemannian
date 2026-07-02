@@ -28,7 +28,7 @@ from mlxtend.feature_selection import SequentialFeatureSelector as SFS
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import (RESULTS_DIR, RANDOM_STATE, PROCESSED_DATA_DIR, SVM_DATA_DIR,
-                    SVM_FIGURES_DIR, BEST_CHANNELS_EVALUATE, FOCUS_BAND)
+                    SVM_FIGURES_DIR, BEST_CHANNELS_EVALUATE, FOCUS_BAND, BANDS)
 
 # =============================================================================
 # PUBLICATION PLOT FUNCTION
@@ -76,7 +76,7 @@ y_train = train_df['Target'].values
 groups_train = train_df['Subject'].values
 
 # A. Load the Top 10 features discovered in Script 2
-top_10_path = PROCESSED_DATA_DIR / "top_10_roi_features.csv"
+top_10_path = PROCESSED_DATA_DIR / f"top_10_roi_features_{FOCUS_BAND}.csv"
 if not top_10_path.exists():
     print(f"Error: Could not find {top_10_path.name}. Please run Script 2 first.")
     sys.exit()
@@ -146,7 +146,7 @@ print(f"{'k':<4} | {'Mean Acc':<10} | {'Std Dev':<10} | {'95% CI':<20}")
 print("-" * 65)
 
 f_counts, cv_scores, cv_stds, tr_scores = [], [], [], []
-stats_results = [] # Lijst om de tabel op te slaan
+stats_results = [] 
 max_acc = 0
 optimal_k = 1
 

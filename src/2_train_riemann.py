@@ -98,12 +98,24 @@ def run_comprehensive_band_selection():
     y = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
     groups = np.load(RIEMANN_DATA_DIR / "groups_train_riemann.npy")
 
-    param_grid_svm = {'svm__kernel': ['rbf'], 'svm__C': [0.1, 1, 10]}
+    param_grid_svm = [
+        {
+            'svm__kernel': ['linear'], 
+            'svm__C': [0.001, 0.01, 0.1, 1, 10]
+        },
+        {
+            'svm__kernel': ['rbf'], 
+            'svm__C': [0.001, 0.01, 0.1, 1, 10], 
+            'svm__gamma': ['scale', 'auto']
+        }
+    ]
     
     # K-Folds instellen (5 outer folds)
-    n_splits_outer = 5
-    cv_outer = StratifiedGroupKFold(n_splits=n_splits_outer, shuffle=True, random_state=RANDOM_STATE)
-    cv_inner = StratifiedGroupKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE) 
+    n_repeats = 10
+    n_splits = 5
+    results = []
+    best_score = 0
+    best_pipeline = None
 
     results = []
     best_score = 0
@@ -149,28 +161,30 @@ def run_comprehensive_band_selection():
         }
 
         for p_name, pipe in pipelines.items():
-            print(f"  ⚙️ Evaluating Architecture: {p_name}")
-            
-            search = GridSearchCV(pipe, param_grid_svm, cv=cv_inner, scoring='balanced_accuracy', n_jobs=-1, verbose=2) if 'SVM' in p_name else pipe
+            print(f" ⚙️ Evaluating Architecture: {p_name}")
             fold_scores = []
             
-            # Voeg tqdm toe rond de outer splits
-            splits = list(cv_outer.split(X_raw, y, groups))
-            with tqdm(total=n_splits_outer, desc=f"    Processing Folds", unit="fold") as pbar:
-                for train_idx, val_idx in splits:
+            # De handmatige 10x10 herhalingsloop
+            for r in range(n_repeats):
+                # Genereer elke repeat een unieke split op basis van een nieuwe seed
+                cv = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=RANDOM_STATE + r)
+                
+                for train_idx, val_idx in cv.split(X_raw, y, groups):
                     if 'SVM' in p_name:
+                        # Binnen de fold zoeken we naar de beste C via een interne 3-fold split
+                        cv_inner = StratifiedGroupKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE + r)
+                        search = GridSearchCV(pipe, param_grid_svm, cv=cv_inner, scoring='balanced_accuracy', n_jobs=-1)
                         search.fit(X_raw[train_idx], y[train_idx], groups=groups[train_idx])
                         score = search.score(X_raw[val_idx], y[val_idx])
                     else:
-                        search.fit(X_raw[train_idx], y[train_idx])
-                        score = balanced_accuracy_score(y[val_idx], search.predict(X_raw[val_idx]))
+                        pipe.fit(X_raw[train_idx], y[train_idx])
+                        score = balanced_accuracy_score(y[val_idx], pipe.predict(X_raw[val_idx]))
                     
                     fold_scores.append(score)
-                    pbar.update(1)
-
+            
             mean_acc = np.mean(fold_scores)
+            print(f"    ✅ Result 10x10 CV -> Mean Bal. Acc: {mean_acc:.4f}")
             param_log = str(search.best_params_) if 'SVM' in p_name else "N/A"
-            print(f"    ✅ Result -> Bal. Acc: {mean_acc:.4f} | Optimal Params: {param_log}\n")
             
             results.append({'Band': band_name.upper(), 'Architecture': p_name, 'CV_Balanced_Accuracy': mean_acc, 'Optimal_Params': param_log})
             

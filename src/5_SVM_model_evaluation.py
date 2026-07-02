@@ -39,7 +39,7 @@ from sklearn.metrics import (accuracy_score, precision_score, recall_score,
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import (PROCESSED_DATA_DIR, SVM_FIGURES_DIR, SVM_DATA_DIR, BANDS, CP_FM_DIR)
+from config import (PROCESSED_DATA_DIR, SVM_FIGURES_DIR, SVM_DATA_DIR, BANDS, CP_FM_DIR, RANDOM_STATE)
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -90,20 +90,20 @@ def plot_svm_network_map(shap_values_fm, feature_names, target_band):
     ch_pos = {ch: (sensor_offsets[i, 0], sensor_offsets[i, 1]) for i, ch in enumerate(info.ch_names)}
 
     max_importance = shap_df['Importance'].max()
-    shap_df['Scaled_Importance'] = (shap_df['Importance'] / max_importance) * 2.5
+    # shap_df['Scaled_Importance'] = (shap_df['Importance'] / max_importance) * 2.5
     
     for _, row in shap_df.iterrows():
         try:
             x_coords = [ch_pos[row['Node1']][0], ch_pos[row['Node2']][0]]
             y_coords = [ch_pos[row['Node1']][1], ch_pos[row['Node2']][1]]
             
-            scaled_val = row['Scaled_Importance']
-            if scaled_val >= 2.0:
-                color, lw = '#FF8C94', 5.0 # Pink/Red
-            elif scaled_val >= 1.0:
-                color, lw = '#8B4513', 3.5 # Brown
-            else:
-                color, lw = '#228B22', 2.0 # Green
+            val = row['Importance']
+            if val >= max_importance * 0.80:       # Top 20% impact
+                color, lw = '#FF8C94', 5.0 
+            elif val >= max_importance * 0.40:     # Mid 40% impact
+                color, lw = '#8B4513', 3.5 
+            else:                                  # Bottom 40% impact
+                color, lw = '#228B22', 2.0 
                 
             ax.plot(x_coords, y_coords, color=color, linewidth=lw, zorder=0, alpha=0.9)
         except KeyError:
@@ -261,7 +261,13 @@ def evaluate_all_svm_bands():
 
         # 5. SHAP ANALYSIS
         print("  -> Calculating SHAP values for interpretability...")
-        explainer = shap.KernelExplainer(final_svm.predict_proba, shap.kmeans(X_test_scaled, 10))
+        # explainer = shap.KernelExplainer(final_svm.predict_proba, shap.kmeans(X_test_scaled, 10))
+        
+        background = shap.kmeans(X_test_scaled, 10)
+        explainer = shap.KernelExplainer(final_svm.predict_proba, background)
+        np.random.seed(RANDOM_STATE)
+        
+        
         shap_values = explainer.shap_values(X_test_scaled)
 
         if isinstance(shap_values, list):

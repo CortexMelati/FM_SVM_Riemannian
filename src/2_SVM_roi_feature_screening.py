@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
@@ -69,7 +70,12 @@ screening_svm.fit(X_train_scaled, y_train)
 # 3. SHAP ANALYSIS
 # ==========================================
 print("-> Calculating SHAP values for the ROI features...")
-explainer = shap.KernelExplainer(screening_svm.predict_proba, shap.kmeans(X_train_scaled, 10))
+
+background = shap.kmeans(X_train_scaled, 10) 
+explainer = shap.KernelExplainer(screening_svm.predict_proba, background)
+
+# Zet de algemene numpy seed vast voor de permutaties van de explainer
+np.random.seed(RANDOM_STATE)
 shap_values = explainer.shap_values(X_train_scaled)
 
 if isinstance(shap_values, list):
@@ -91,7 +97,7 @@ print(f"\nTOP 10 FEATURES WITHIN ROI ({FOCUS_BAND.upper()} Band):")
 print(top_10_df.to_string(index=False))
 
 # Save the Top 10 list so the mSFFS script can load it
-top_10_path = PROCESSED_DATA_DIR / "top_10_roi_features.csv"
+top_10_path = PROCESSED_DATA_DIR / f"top_10_roi_features_{FOCUS_BAND}.csv"
 top_10_df.to_csv(top_10_path, index=False)
 print(f"-> Saved Top 10 features to {top_10_path.name}")
 
@@ -121,11 +127,6 @@ ch_pos = {ch: (sensor_offsets[i, 0], sensor_offsets[i, 1]) for i, ch in enumerat
 
 max_shap = top_10_df['Mean_Abs_SHAP'].max()
 
-# Schaal de SHAP waarden naar de logica van de paper (grenzen: 0.5, 1.0, 2.0)
-# Door maal 2.5 te doen forceer je dat de absolute top-feature als "Roze" wordt geclassificeerd.
-top_10_df = top_10_df.copy()
-top_10_df['Scaled_Importance'] = (top_10_df['Mean_Abs_SHAP'] / max_shap) * 2.5
-
 for _, row in top_10_df.iterrows():
     feat = row['Feature']
     node1 = feat.split('-')[0]
@@ -135,26 +136,25 @@ for _, row in top_10_df.iterrows():
         x_coords = [ch_pos[node1][0], ch_pos[node2][0]]
         y_coords = [ch_pos[node1][1], ch_pos[node2][1]]
         
-        # 3. Pas de kleuren en dikte toe (Groen/Bruin/Roze)
-        scaled_val = row['Scaled_Importance']
-        if scaled_val >= 2.0:
-            color, lw = '#FF8C94', 5.0  # Roze
-        elif scaled_val >= 1.0:
-            color, lw = '#8B4513', 3.5  # Bruin
-        else:
-            color, lw = '#228B22', 2.0  # Groen
+        # Gebruik de originele Mean_Abs_SHAP en drempelwaarden gebaseerd op JOUW verdeling
+        val = row['Mean_Abs_SHAP']
+        if val >= max_shap * 0.80:       # Top 20% connecties (Roze)
+            color, lw = '#FF8C94', 5.0
+        elif val >= max_shap * 0.40:     # Top 20-60% connecties (Bruin)
+            color, lw = '#8B4513', 3.5
+        else:                            # Onderste 40% (Groen)
+            color, lw = '#228B22', 2.0
             
-        # Teken de lijn met zorder=0 zodat hij mooi onder de sensoren doorloopt
         ax.plot(x_coords, y_coords, color=color, linewidth=lw, alpha=0.9, zorder=0)
     except KeyError:
-        pass # Negeer kanalen die niet in de 19-kanaals standaard vallen
+        pass
 
 ax.set_title(f"Top 10 Connectivity Features within ROI\n({FOCUS_BAND.upper()} Band - SHAP Importance)", fontsize=14, pad=20)
 plt.tight_layout()
 
 # Sla op met een transparante achtergrond voor in je LaTeX document
 plot_path = FIGURES_DIR / f"Figure_Intermediate_Top10_ROI_{FOCUS_BAND}.png"
-plt.savefig(plot_path, dpi=300, transparent=True)
+plt.savefig(plot_path, dpi=300, transparent=False)
 plt.close()
 
 print(f"-> Intermediate plot saved to {plot_path.name}")
