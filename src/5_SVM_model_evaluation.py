@@ -32,10 +32,12 @@ from pathlib import Path
 import sys
 import joblib
 
+
 from sklearn.manifold import TSNE
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
                              roc_auc_score, confusion_matrix, brier_score_loss,
-                             average_precision_score)
+                             average_precision_score, balanced_accuracy_score)
+from sklearn.utils import shuffle
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
@@ -184,10 +186,26 @@ def evaluate_all_svm_bands():
         auprc = average_precision_score(y_test, y_prob) 
         brier = brier_score_loss(y_test, y_prob)
         ece = expected_calibration_error(y_test, y_prob)
+        
+        n_permutations = 1000
+        permuted_scores = []
+        for i in range(n_permutations):
+            # Hussel de test labels willekeurig
+            y_test_shuffled = shuffle(y_test, random_state=RANDOM_STATE + i)
+            # Bereken de accuraatheid van het ongewijzigde model op de gehusselde labels
+            score = balanced_accuracy_score(y_test_shuffled, y_pred)
+            permuted_scores.append(score)
+
+        # Bereken de p-waarde (hoe vaak was de gehusselde score gelijk aan of beter dan de echte score?)
+        pvalue = (np.sum(np.array(permuted_scores) >= acc) + 1) / (n_permutations + 1)
+
+        print(f"\nPERMUTATION TEST (Test Set):")
+        print(f"-> True Model Accuracy: {acc:.4f}")
+        print(f"-> P-value: {pvalue:.4f}")
 
         # Log metrics to final results table
         # Extract C, gamma, kernel from the final_svm model (assuming it's an SVC)
-        opt_params = f"C={final_svm.C}, y={final_svm.gamma}, {final_svm.kernel}"
+        opt_params = f"C={final_svm.C}, g={final_svm.gamma:.4f}, {final_svm.kernel}"
         
         final_results.append({
             'Band': band_name.upper(),
@@ -198,7 +216,8 @@ def evaluate_all_svm_bands():
             'AUPRC': f"{auprc:.4f}",
             'AUROC': f"{auc:.4f}",
             'Brier': f"{brier:.4f}",
-            'ECE': f"{ece:.4f}"
+            'ECE': f"{ece:.4f}",
+            'Permutation_P': f"{pvalue:.4f}"  # <--- P-waarde netjes toegevoegd aan je LaTeX tabel!
         })
 
         # Save Individual Text Report
@@ -213,6 +232,7 @@ def evaluate_all_svm_bands():
             f"AUPRC:           {auprc:.4f}\n"
             f"Brier Score:     {brier:.4f}\n"
             f"ECE:             {ece:.4f}\n"
+            f"Permutation P:   {pvalue:.4f}\n"
             f"====================================================\n"
         )
         report_path = SVM_DATA_DIR / f"final_test_metrics_report_{band_name_lower}.txt"

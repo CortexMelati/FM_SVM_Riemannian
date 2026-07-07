@@ -7,6 +7,8 @@ Overview:
     restricted ROI feature space. It evaluates subsets of increasing sizes 
     (from 1 to 20 features) using Stratified Group K-Fold cross-validation.
     
+    we select the top 5 to train on for the SVM model. 
+    
     It replicates Figure 3 and exports the definitive list of optimal features.
 
 Execution:
@@ -33,25 +35,28 @@ from config import (RESULTS_DIR, RANDOM_STATE, PROCESSED_DATA_DIR, SVM_DATA_DIR,
 # =============================================================================
 # PUBLICATION PLOT FUNCTION
 # =============================================================================
-def plot_msffs_curve(features_count, train_scores, cv_scores, cv_std, target_band):
+def plot_msffs_curve(features_count, train_scores, cv_scores, cv_std, ci_margins, target_band):
     plt.figure(figsize=(12, 6))
     x_axis = np.array(features_count)
     
+    # Het schaduwvlak blijft de ±1 SD (label aangepast voor statistische accuraatheid)
     plt.fill_between(x_axis, cv_scores - cv_std, cv_scores + cv_std, 
-                     color='#e6eef4', alpha=0.7, label='Confidence Interval (±1 SD)')
+                     color='#e6eef4', alpha=0.7, label='Standard Deviation (±1 SD)')
     
     plt.plot(x_axis, cv_scores, marker='o', markersize=4, color='#5c8cbc', lw=1.5, label='Cross-validation accuracy')
     plt.plot(x_axis, train_scores, marker='o', markersize=4, color='#fba232', lw=1.5, label='Training accuracy')
     
-    for i, (tr, cv) in enumerate(zip(train_scores, cv_scores)):
+    # AANGEPAST: We printen nu de CI marge (±) in plaats van de SD
+    for i, (tr, cv, ci) in enumerate(zip(train_scores, cv_scores, ci_margins)):
         plt.text(x_axis[i], tr + 0.002, f"{tr:.3f}", color='#fba232', fontsize=9, ha='center', va='bottom')
-        plt.text(x_axis[i], cv - 0.003, f"{cv:.3f}", color='#5c8cbc', fontsize=9, ha='center', va='top')
+        # We printen de 95% CI (±) direct onder de CV accuracy
+        plt.text(x_axis[i], cv - 0.003, f"{cv:.3f}\n(±{ci:.3f})", color='#5c8cbc', fontsize=8, ha='center', va='top')
 
     plt.title(f"Classification accuracy scores when searching in ROI ({target_band.upper()} band)", fontsize=12, pad=20)
     plt.xlabel('Number of features used', fontsize=11)
     plt.ylabel('Accuracy', fontsize=11)
     plt.xticks(np.arange(min(features_count), max(features_count)+1, 1.0))
-    plt.ylim([min(cv_scores - cv_std) - 0.02, 1.02])
+    plt.ylim([min(cv_scores - cv_std) - 0.05, 1.05])
     
     ax = plt.gca()
     ax.spines['top'].set_visible(False)
@@ -123,14 +128,21 @@ print(f"-> Created {len(cv_splits)} cross-validation folds (10 repeats of 5-fold
 # 3. mSFFS ALGORITHM
 # =============================================================================
 print("-> Running mSFFS algorithm (Evaluating subsets from 1 to 20 features)...")
-base_svm = SVC(kernel='rbf', gamma='scale', random_state=RANDOM_STATE)
+# Amend to settings from script 4 if needed 
+base_svm = SVC(
+    kernel='rbf', 
+    # C=10, 
+    gamma='scale', 
+    class_weight='balanced', 
+    random_state=RANDOM_STATE
+)
 
 sfs = SFS(
     base_svm, 
     k_features=(1, 20),
     forward=True,
     floating=True,
-    scoring='accuracy', 
+    scoring='balanced_accuracy', 
     cv=cv_splits,          
     n_jobs=-1              
 )
@@ -138,14 +150,54 @@ sfs = SFS(
 sfs = sfs.fit(X_train_scaled, y_train)
 metric_dict = sfs.get_metric_dict()
 
+
+# # =============================================================================
+# # 3. mSFFS ALGORITHM (Methodologically Aligned with Target Model)
+# # =============================================================================
+# print("-> Running mSFFS algorithm (Evaluating subsets from 1 to 20 features)...")
+
+# # Definieer de optimale parameters die in Script 4 zijn gevonden (Kohavi & John, 1997)
+# optimal_params = {
+#     'gamma': {'C': 10, 'gamma': 0.2976},
+#     'beta':  {'C': 1, 'gamma': 0.2976},
+#     'default': {'C': 1.0, 'gamma': 'scale'} # Fallback voor andere banden
+# }
+
+# band_key = FOCUS_BAND.lower()
+# current_params = optimal_params.get(band_key, optimal_params['default'])
+
+# print(f"-> Applying optimal hyperparameter alignment for {band_key.upper()}: C={current_params['C']}, gamma={current_params['gamma']}")
+
+# base_svm = SVC(
+#     kernel='rbf', 
+#     C=current_params['C'], 
+#     gamma=current_params['gamma'], 
+#     class_weight='balanced', # Cruciaal voor imbalanced segmenten
+#     random_state=RANDOM_STATE
+# )
+
+# sfs = SFS(
+#     base_svm, 
+#     k_features=(1, 20),
+#     forward=True,
+#     floating=True,
+#     scoring='balanced_accuracy', # Uitgelijnd met evaluatie-metric
+#     cv=cv_splits,          
+#     n_jobs=-1              
+# )
+
+# sfs = sfs.fit(X_train_scaled, y_train)
+# metric_dict = sfs.get_metric_dict()
+
 # =============================================================================
 # 4. STATISTICAL EVALUATION (Finding the Maximum Performance)
 # =============================================================================
-print("\n" + "="*65)
-print(f"{'k':<4} | {'Mean Acc':<10} | {'Std Dev':<10} | {'95% CI':<20}")
-print("-" * 65)
+print("\n" + "="*85)
+print(f"{'k':<3} | {'Added/Changed Feature':<25} | {'Mean Acc':<9} | {'Std Dev':<8} | {'95% CI'}")
+print("-" * 85)
 
-f_counts, cv_scores, cv_stds, tr_scores = [], [], [], []
+# AANGEPAST: ci_margins lijst toegevoegd om door te geven aan de plot
+f_counts, cv_scores, cv_stds, tr_scores, ci_margins = [], [], [], [], []
 stats_results = [] 
 max_acc = 0
 optimal_k = 1
@@ -153,6 +205,20 @@ optimal_k = 1
 for k in range(1, len(metric_dict) + 1):
     if k not in metric_dict: continue
     
+    # Bepaal welke feature bij deze stap is toegevoegd (of verwijderd via floating)
+    if k == 1:
+        step_feature = f"+{metric_dict[k]['feature_names'][0]}"
+    else:
+        prev_set = set(metric_dict[k-1]['feature_names'])
+        curr_set = set(metric_dict[k]['feature_names'])
+        added = curr_set - prev_set
+        removed = prev_set - curr_set
+        
+        changes = []
+        if added: changes.append(f"+{', '.join(added)}")
+        if removed: changes.append(f"-{', '.join(removed)}")
+        step_feature = " ".join(changes)
+
     # Extract fold scores
     fold_scores = metric_dict[k]['cv_scores']
     mean_acc = np.mean(fold_scores)
@@ -164,19 +230,24 @@ for k in range(1, len(metric_dict) + 1):
     ci_lower, ci_upper = mean_acc - ci_margin, mean_acc + ci_margin
     ci_str = f"[{ci_lower:.4f} - {ci_upper:.4f}]"
 
-    print(f"{k:<4} | {mean_acc:.4f}     | {std_acc:.4f}     | {ci_str:<20}")
+    # Print inclusief de specifieke feature
+    print(f"{k:<3} | {step_feature:<25} | {mean_acc:.4f}   | {std_acc:.4f}   | {ci_str}")
     
-    # Sla de rij op voor de CSV export (zonder p-value)
+    # Sla de rij op voor de CSV export
     stats_results.append({
         'k': k,
+        'Feature_Change': step_feature,
+        'Current_Subset': ", ".join(metric_dict[k]['feature_names']),
         'Mean_Acc': round(mean_acc, 4),
         'Std_Dev': round(std_acc, 4),
         '95_percent_CI': ci_str
     })
     
+    # Data verzamelen voor de plot
     f_counts.append(k)
     cv_scores.append(mean_acc)
     cv_stds.append(std_acc)
+    ci_margins.append(ci_margin) # Sla de marge (bijv. 0.012) op voor de tekst in de plot
     
     subset = list(metric_dict[k]['feature_names'])
     base_svm.fit(X_train_scaled[subset], y_train)
@@ -186,7 +257,7 @@ for k in range(1, len(metric_dict) + 1):
         max_acc = mean_acc
         optimal_k = k
 
-print("=" * 65)
+print("=" * 85)
 
 final_features = list(metric_dict[optimal_k]['feature_names'])
 final_acc = metric_dict[optimal_k]['avg_score']
@@ -199,7 +270,7 @@ print(f"-> Selected Biomarkers: {', '.join(final_features)}")
 # =============================================================================
 # 5. PLOT AND SAVE EXPORTS
 # =============================================================================
-plot_msffs_curve(f_counts, np.array(tr_scores), np.array(cv_scores), np.array(cv_stds), FOCUS_BAND)
+plot_msffs_curve(f_counts, np.array(tr_scores), np.array(cv_scores), np.array(cv_stds), np.array(ci_margins), FOCUS_BAND)
 
 # 5A. Save the statistical table
 stats_df = pd.DataFrame(stats_results)

@@ -19,6 +19,7 @@ import sys
 import joblib
 import glob
 import os
+import numpy as np
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
@@ -50,7 +51,10 @@ for file_path in model_files:
     # 3. Lees de opgeslagen metrics en features
     n_features = len(artifact['features'])
     train_acc = artifact['training_accuracy']
-    p_val = artifact['p_value']
+    
+    # VEILIGE FIX: Haalt p_value veilig op. Omdat we deze naar Script 5 hebben verplaatst 
+    # (om datalekkage te voorkomen), vullen we hier een Not-a-Number in als hij ontbreekt.
+    p_val = artifact.get('p_value', np.nan) 
     
     # 4. Voeg toe aan het logboek
     logbook_entries.append({
@@ -60,7 +64,7 @@ for file_path in model_files:
         'Gamma_Parameter': round(gamma_val, 6) if isinstance(gamma_val, float) else gamma_val,
         'Class_Weight': str(weight_val),
         'CV_Balanced_Accuracy': round(train_acc, 4),
-        'Permutation_P_Value': round(p_val, 4)
+        'Permutation_P_Value': round(p_val, 4) if not np.isnan(p_val) else "Zie Script 5"
     })
 
 # =============================================================================

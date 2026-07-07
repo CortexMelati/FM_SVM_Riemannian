@@ -166,7 +166,8 @@ def process_target_domain():
     X_target = np.concatenate(X_target_list)
     np.save(RIEMANN_DATA_DIR / f"target_y_{CROSS_TARGET_DATASET.lower()}.npy", np.array(y_target_list))
     np.save(RIEMANN_DATA_DIR / f"target_groups_{CROSS_TARGET_DATASET.lower()}.npy", np.array(group_target_list))
-
+    np.save(RIEMANN_DATA_DIR / f"target_X_{CROSS_TARGET_DATASET.lower()}_raw.npy", X_target)
+    
     print(f"  📊 Target Tensor: {X_target.shape}")
 
     for band_name, (l_freq, h_freq) in BANDS.items():

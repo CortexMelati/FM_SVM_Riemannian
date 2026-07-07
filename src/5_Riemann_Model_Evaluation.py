@@ -1,15 +1,15 @@
 """
 =============================================================================
-4. RIEMANNIAN MODEL EVALUATION (Test Set)
+5. RIEMANNIAN MODEL EVALUATION (Test Set - Subject Level)
 =============================================================================
 Overview:
     This script evaluates the frozen Riemannian winning models 
     on the strictly isolated 20% hold-out test set across all frequency bands.
-    It computes the final clinical metrics and generates a confusion matrix,
-    matching the exact evaluation protocol of the SVM pipeline.
+    Crucially, it applies Majority Voting to group the 1-second epochs back 
+    into clinical predictions per subject, matching the SVM evaluation protocol.
 
 Execution:
-    python 4_Riemann_Model_Evaluation.py
+    python 5_Riemann_Model_Evaluation.py
 =============================================================================
 """
 
@@ -36,7 +36,7 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR, BANDS, BEST_CHANNELS_EVALUATE, CHANNELS_1020, RANDOM_STATE
 
-# --- Custom Transformers (Required for loading/building pipelines) ---
+# --- Custom Transformers ---
 class MNEBandPass(BaseEstimator, TransformerMixin):
     def __init__(self, l_freq, h_freq, sfreq=500):
         self.l_freq, self.h_freq, self.sfreq = l_freq, h_freq, sfreq
@@ -66,29 +66,28 @@ def expected_calibration_error(y_true, y_prob, n_bins=10):
     return ece
 
 def evaluate_riemann_testset():
-    print("🚀 STARTING STEP 4: RIEMANNIAN EVALUATION ON UNSEEN TEST SET")
+    print("🚀 STARTING STEP 5: RIEMANNIAN EVALUATION ON UNSEEN TEST SET (SUBJECT-LEVEL)")
 
-    # 1. LOAD RAW DATA AND SCOREBOARD
     X_train_raw = np.load(RIEMANN_DATA_DIR / "X_train_raw.npy")
     y_train = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
     X_test_raw = np.load(RIEMANN_DATA_DIR / "X_test_raw.npy")
     y_test = np.load(RIEMANN_DATA_DIR / "y_test_riemann.npy")
+    # LOAD THE GROUPS FOR THE TEST SET TO ENABLE MAJORITY VOTING
+    groups_test = np.load(RIEMANN_DATA_DIR / "groups_test_riemann.npy") 
     
     scoreboard_path = RIEMANN_DATA_DIR / "riemann_comprehensive_scoreboard.csv"
     if not scoreboard_path.exists():
-        sys.exit("🚨 Scoreboard not found! Please run Script 2 first.")
+        sys.exit("🚨 Scoreboard not found! Please run Script 2/3 first.")
     scoreboard = pd.read_csv(scoreboard_path)
     
     ROI_INDICES = [CHANNELS_1020.index(ch) for ch in BEST_CHANNELS_EVALUATE]
-    valid_architectures = ['TSSVM_Cov', 'TSSVM_Xdawn'] # Exclude MDM and Coh as per methodology
+    valid_architectures = ['TSSVM_Cov', 'TSSVM_Xdawn']
 
     final_results = []
 
-    # 2. ITERATE OVER EACH FREQUENCY BAND
     for band_name, (l_freq, h_freq) in BANDS.items():
         print(f"\n{'='*50}\n📡 ANALYZING BAND: {band_name.upper()}\n{'='*50}")
         
-        # Find the best valid architecture for this specific band
         band_scores = scoreboard[(scoreboard['Band'] == band_name.upper()) & (scoreboard['Architecture'].isin(valid_architectures))]
         if band_scores.empty:
             print(f"⚠️ No valid results found for {band_name}. Skipping...")
@@ -101,23 +100,15 @@ def evaluate_riemann_testset():
         print(f"-> Optimal Architecture: {arch}")
         print(f"-> Optimal Params: C={params['svm__C']}, Kernel={params['svm__kernel']}")
         
-        # 3. BUILD AND TRAIN THE OPTIMAL PIPELINE
-        print("-> Training pipeline on full training set...")
         steps = [
             ('filter', MNEBandPass(l_freq, h_freq, 500)),
             ('roi', ROIExtractor(ROI_INDICES))
         ]
         
         if arch == 'TSSVM_Cov':
-            steps.extend([
-                ('cov', Covariances(estimator='oas')),
-                ('ts', TangentSpace(metric='riemann'))
-            ])
+            steps.extend([('cov', Covariances(estimator='oas')), ('ts', TangentSpace(metric='riemann'))])
         elif arch == 'TSSVM_Xdawn':
-            steps.extend([
-                ('xdawn', XdawnCovariances(nfilter=6, estimator='oas')),
-                ('ts', TangentSpace(metric='riemann'))
-            ])
+            steps.extend([('xdawn', XdawnCovariances(nfilter=6, estimator='oas')), ('ts', TangentSpace(metric='riemann'))])
             
         steps.extend([
             ('scaler', StandardScaler()),
@@ -125,20 +116,43 @@ def evaluate_riemann_testset():
         ])
         
         pipeline = Pipeline(steps)
+        print("-> Training optimal pipeline on full training data...")
         pipeline.fit(X_train_raw, y_train)
 
-        # 4. PREDICT ON UNSEEN DATA AND CALCULATE METRICS
-        print("-> Predicting on Unseen Test Data...")
-        y_pred = pipeline.predict(X_test_raw)
-        y_prob = pipeline.predict_proba(X_test_raw)[:, 1]
+        print("-> Predicting on Unseen Test Data (1-second epochs)...")
+        y_pred_epochs = pipeline.predict(X_test_raw)
+        y_prob_epochs = pipeline.predict_proba(X_test_raw)[:, 1]
 
-        acc = accuracy_score(y_test, y_pred)
-        prec = precision_score(y_test, y_pred, zero_division=0)
-        rec = recall_score(y_test, y_pred, zero_division=0)
-        auc = roc_auc_score(y_test, y_prob)
-        auprc = average_precision_score(y_test, y_prob) 
-        brier = brier_score_loss(y_test, y_prob)
-        ece = expected_calibration_error(y_test, y_prob)
+        # --- APPLY MAJORITY VOTING FOR SUBJECT-LEVEL EVALUATION ---
+        print("-> Aggregating predictions to Subject-Level...")
+        df_preds = pd.DataFrame({
+            'Subject': groups_test,
+            'True_Label': y_test,
+            'Pred_Class': y_pred_epochs,
+            'Pred_Prob': y_prob_epochs
+        })
+
+        # Calculate the majority vote and average probability per subject
+        df_subject = df_preds.groupby('Subject').agg(
+            True_Label=('True_Label', 'first'), 
+            Pred_Class=('Pred_Class', lambda x: x.mode()[0]), # Majority Vote
+            Pred_Prob=('Pred_Prob', 'mean') # Average confidence
+        ).reset_index()
+
+        y_test_sub = df_subject['True_Label'].values
+        y_pred_sub = df_subject['Pred_Class'].values
+        y_prob_sub = df_subject['Pred_Prob'].values
+
+        print(f"-> Evaluation compressed from {len(y_test)} epochs to {len(y_test_sub)} unique subjects/macro-segments.")
+
+        # --- CALCULATE METRICS ON SUBJECT LEVEL ---
+        acc = accuracy_score(y_test_sub, y_pred_sub)
+        prec = precision_score(y_test_sub, y_pred_sub, zero_division=0)
+        rec = recall_score(y_test_sub, y_pred_sub, zero_division=0)
+        auc = roc_auc_score(y_test_sub, y_prob_sub)
+        auprc = average_precision_score(y_test_sub, y_prob_sub) 
+        brier = brier_score_loss(y_test_sub, y_prob_sub)
+        ece = expected_calibration_error(y_test_sub, y_prob_sub)
 
         final_results.append({
             'Band': band_name.upper(),
@@ -153,35 +167,16 @@ def evaluate_riemann_testset():
             'ECE': f"{ece:.4f}"
         })
 
-        # 5. GENERATE REPORT AND PLOT CONFUSION MATRIX
-        report_text = (
-            f"====================================================\n"
-            f" FINAL RIEMANNIAN TEST SET METRICS - {band_name.upper()} BAND \n"
-            f" Architecture: {arch} \n"
-            f"====================================================\n"
-            f"Balanced Accuracy: {acc:.4f}\n"
-            f"Precision:         {prec:.4f}\n"
-            f"Sensitivity:       {rec:.4f}\n"
-            f"ROC-AUC:           {auc:.4f}\n"
-            f"AUPRC:             {auprc:.4f}\n"
-            f"Brier Score:       {brier:.4f}\n"
-            f"ECE:               {ece:.4f}\n"
-            f"====================================================\n"
-        )
-        
-        report_path = RIEMANN_DATA_DIR / f"final_test_metrics_riemann_{band_name}_{arch}.txt"
-        with open(report_path, "w") as f:
-            f.write(report_text)
-
-        cm = confusion_matrix(y_test, y_pred)
+        # --- GENERATE PLOTS ---
+        cm = confusion_matrix(y_test_sub, y_pred_sub)
         plt.figure(figsize=(6, 5))
         sns.heatmap(cm, annot=True, fmt='d', cmap='Oranges',
                     xticklabels=['Healthy (0)', 'Fibro (1)'], 
                     yticklabels=['Healthy (0)', 'Fibro (1)'],
                     annot_kws={"size": 16})
-        plt.title(f'Riemannian FINAL Validation ({arch} - {band_name.upper()})\n(Accuracy: {acc:.2%})', fontsize=14)
-        plt.ylabel('True Label', fontsize=12)
-        plt.xlabel('Predicted Label', fontsize=12)
+        plt.title(f'Riemannian FINAL Validation ({arch} - {band_name.upper()})\nSubject-Level (Accuracy: {acc:.2%})', fontsize=14)
+        plt.ylabel('True Clinical Diagnosis', fontsize=12)
+        plt.xlabel('Predicted Diagnosis (Majority Vote)', fontsize=12)
         plt.tight_layout()
         
         RIEMANN_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -194,11 +189,9 @@ def evaluate_riemann_testset():
     csv_path = RIEMANN_DATA_DIR / "final_riemannian_test_table.csv"
     results_df.to_csv(csv_path, index=False)
     
-    print(f"\n{'='*70}\n🏆 ALL BANDS EVALUATED SUCCESSFULLY!\n{'='*70}")
+    print(f"\n{'='*70}\n🏆 ALL BANDS EVALUATED SUCCESSFULLY (SUBJECT-LEVEL)!\n{'='*70}")
     print("Here is your final data for the LaTeX Table 2:\n")
     print(results_df.to_string(index=False))
-    print(f"\n✅ Master table saved to: riemann_data/{csv_path.name}")
-    print("✅ All confusion matrices saved to: riemann_figures/")
 
 if __name__ == "__main__":
     evaluate_riemann_testset()

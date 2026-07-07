@@ -3,10 +3,10 @@
 Initial Global Feature Ranking
 =============================================================================
 This script trains a model on ALL 855 features (all bands, all channels)
-to generate the initial SHAP-ranking and to justify the choice for the 
-Gamma ROI.
+to generate the initial SHAP-ranking and to justify the choice for the best 
+ROI channels and band.
 
-Note: Because there are 855 features, the SHAP KernelExplainer 
+Note: Because there are 855 features, the SHAP KernelExplainer is used
 
 
 python 1_SVM_feature_ranking.py
@@ -75,17 +75,17 @@ feature_importance = pd.DataFrame({
     'Mean_Abs_SHAP': mean_abs_shap
 }).sort_values(by='Mean_Abs_SHAP', ascending=False)
 
-top_15_features = feature_importance.head(15)
+top_10_features = feature_importance.head(10)
 
-print("\nTOP 15 GLOBAL FEATURES:")
-print(top_15_features.to_string(index=False))
+print("\nTOP 10 GLOBAL FEATURES:")
+print(top_10_features.to_string(index=False))
 
 # 6. Custom Horizontal Bar Plot (Figure 1 replication with data labels)
 # We recreate the SHAP summary plot manually to add the numerical values
 plt.figure(figsize=(12, 8))
 
 # Sort ascending purely for plotting (so the highest value is at the top)
-plot_df = top_15_features.sort_values(by='Mean_Abs_SHAP', ascending=True)
+plot_df = top_10_features.sort_values(by='Mean_Abs_SHAP', ascending=True)
 
 # Create the horizontal bars (using the standard SHAP blue color)
 bars = plt.barh(plot_df['Feature'], plot_df['Mean_Abs_SHAP'], color='#1f77b4', height=0.6)

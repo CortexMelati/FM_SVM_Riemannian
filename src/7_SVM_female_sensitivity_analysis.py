@@ -69,6 +69,11 @@ if merged_df.empty:
 female_df = merged_df[merged_df['sex'].str.lower() == 'f'].copy()
 print(f"-> Total segments in training set: {len(train_df)}")
 print(f"-> Isolated female-only subset:    {len(female_df)} segments.")
+print("\n🔍 DEMOGRAPHIC VERIFICATION (Sanity Check):")
+print(f"-> Genders in this subset: {female_df['sex'].unique()}")
+print(f"-> Class distribution (0 = HC, 1 = FM):")
+print(female_df['Target'].value_counts().to_string())
+print("="*60 + "\n")
 
 y_female = female_df['Target'].values
 groups_female = female_df['Subject'].values

@@ -140,7 +140,8 @@ for n_splits in fold_range:
         
         # Method 2: TRANSFER LEARNING (TrAdaBoost)
         boost_base = SVC(C=frozen_svm.C, gamma=frozen_svm.gamma, kernel='rbf', probability=True, random_state=RANDOM_STATE)
-        tr_model = TrAdaBoost(estimator=boost_base, n_estimators=10, random_state=RANDOM_STATE)
+        tr_model = TrAdaBoost(estimator=boost_base, n_estimators=50, random_state=RANDOM_STATE)
+        # change n_estimators to a number between 10 and 50 (50 runs for aprx 30 mins)
         
         tr_model.fit(X_source, y_source, Xt=X_tgt_tr, yt=y_tgt_tr)
         

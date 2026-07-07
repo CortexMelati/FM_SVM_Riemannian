@@ -109,14 +109,9 @@ def run_comprehensive_band_selection():
             'svm__gamma': ['scale', 'auto']
         }
     ]
-    
-    # K-Folds instellen (5 outer folds)
+
     n_repeats = 10
     n_splits = 5
-    results = []
-    best_score = 0
-    best_pipeline = None
-
     results = []
     best_score = 0
     best_pipeline = None
@@ -125,21 +120,21 @@ def run_comprehensive_band_selection():
     for band_name, (l_freq, h_freq) in BANDS.items():
         print(f"\n{'='*50}\n📡 FREQUENCY BAND: {band_name.upper()}\n{'='*50}")
         
+        covs_path = RIEMANN_DATA_DIR / f"covs_train_{band_name}_roi.npy"
+        if not covs_path.exists():
+            print(f"⚠️ Missing covariance matrices for {band_name}. Skipping band...")
+            continue
+        X_covs = np.load(covs_path)
+        
         pipelines = {
-            # 'MDM_Cov': Pipeline([
-            #     ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
-            #     ('roi', ROIExtractor(ROI_INDICES)),
-            #     ('cov', Covariances(estimator='oas')),
-            #     ('mdm', MDM(metric=dict(mean='riemann', distance='riemann')))
-            # ]),
+            'MDM_Cov': MDM(metric=dict(mean='riemann', distance='riemann')),
+            
             'TSSVM_Cov': Pipeline([
-                ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
-                ('roi', ROIExtractor(ROI_INDICES)),
-                ('cov', Covariances(estimator='oas')),
                 ('ts', TangentSpace(metric='riemann')),
                 ('scaler', StandardScaler()),
                 ('svm', SVC(class_weight='balanced', probability=True, random_state=RANDOM_STATE))
             ]),
+            
             'TSSVM_Xdawn': Pipeline([
                 ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
                 ('roi', ROIExtractor(ROI_INDICES)),
@@ -148,37 +143,40 @@ def run_comprehensive_band_selection():
                 ('scaler', StandardScaler()),
                 ('svm', SVC(class_weight='balanced', probability=True, random_state=RANDOM_STATE))
             ]),
-            # 'TSSVM_Coh': Pipeline([
-            #     ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
-            #     ('roi', ROIExtractor(ROI_INDICES)),
-            #     ('coh', Coherences(coh='lagged')),
-            #     ('avg_freq', AverageFrequencies()), # <--- DEZE NIEUWE STAP PERST HEM PLAT!
-            #     ('spd', NearestSPD()),
-            #     ('ts', TangentSpace(metric='riemann')),
-            #     ('scaler', StandardScaler()),
-            #     ('svm', SVC(class_weight='balanced', probability=True, random_state=RANDOM_STATE))
-            # ])
+            
+            'TSSVM_Coh': Pipeline([
+                ('filter', MNEBandPass(l_freq, h_freq, SFREQ)),
+                ('roi', ROIExtractor(ROI_INDICES)),
+                ('coh', Coherences(coh='lagged')),
+                ('avg_freq', AverageFrequencies()), 
+                ('spd', NearestSPD()),
+                ('ts', TangentSpace(metric='riemann')),
+                ('scaler', StandardScaler()),
+                ('svm', SVC(class_weight='balanced', probability=True, random_state=RANDOM_STATE))
+            ])
         }
 
         for p_name, pipe in pipelines.items():
             print(f" ⚙️ Evaluating Architecture: {p_name}")
+            
+            X_input = X_covs if 'Cov' in p_name else X_raw
+            
             fold_scores = []
             
-            # De handmatige 10x10 herhalingsloop
             for r in range(n_repeats):
-                # Genereer elke repeat een unieke split op basis van een nieuwe seed
                 cv = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=RANDOM_STATE + r)
                 
-                for train_idx, val_idx in cv.split(X_raw, y, groups):
+                for train_idx, val_idx in cv.split(X_input, y, groups):
+                    
                     if 'SVM' in p_name:
-                        # Binnen de fold zoeken we naar de beste C via een interne 3-fold split
                         cv_inner = StratifiedGroupKFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE + r)
                         search = GridSearchCV(pipe, param_grid_svm, cv=cv_inner, scoring='balanced_accuracy', n_jobs=-1)
-                        search.fit(X_raw[train_idx], y[train_idx], groups=groups[train_idx])
-                        score = search.score(X_raw[val_idx], y[val_idx])
+                        search.fit(X_input[train_idx], y[train_idx], groups=groups[train_idx])
+                        score = search.score(X_input[val_idx], y[val_idx])
+                    # for pure MDM: Direct fit
                     else:
-                        pipe.fit(X_raw[train_idx], y[train_idx])
-                        score = balanced_accuracy_score(y[val_idx], pipe.predict(X_raw[val_idx]))
+                        pipe.fit(X_input[train_idx], y[train_idx])
+                        score = balanced_accuracy_score(y[val_idx], pipe.predict(X_input[val_idx]))
                     
                     fold_scores.append(score)
             
@@ -188,38 +186,52 @@ def run_comprehensive_band_selection():
             
             results.append({'Band': band_name.upper(), 'Architecture': p_name, 'CV_Balanced_Accuracy': mean_acc, 'Optimal_Params': param_log})
             
+            # Save the best overall model
             if mean_acc > best_score:
-                best_score, best_model_name = mean_acc, f"model_riemann_{band_name}_{p_name}.pkl"
-                best_pipeline = search.best_estimator_ if 'SVM' in p_name else search
-                
-                # Fit final model silently without progress bar
-                best_pipeline.fit(X_raw, y)
+                best_score = mean_acc
+                best_model_name = f"model_riemann_{band_name}_{p_name}.pkl"
+                best_pipeline = search.best_estimator_ if 'SVM' in p_name else pipe
+
+    # =========================================================================
+    # FIT HET WINNENDE MODEL OP DE VOLLEDIGE TRAININGSDATA EN SLA OP
+    # =========================================================================
+    print(f"\n-> Re-training winning model ({best_model_name}) on full dataset...")
+    
+    # Haal de naam van de winnende band uit de bestandsnaam (bijv. 'ALPHA')
+    winning_band = best_model_name.split('_')[2].lower()
+    
+    # Laad dynamisch de juiste data voor de final fit
+    if 'Cov' in best_model_name:
+        X_final_fit = np.load(RIEMANN_DATA_DIR / f"covs_train_{winning_band}_roi.npy")
+    else:
+        X_final_fit = X_raw
+
+    best_pipeline.fit(X_final_fit, y)
 
     # Export & Freeze
     pd.DataFrame(results).sort_values(by='CV_Balanced_Accuracy', ascending=False).to_csv(RIEMANN_DATA_DIR / "riemann_comprehensive_scoreboard.csv", index=False)
     
     artifact_path = SVM_DATA_DIR / best_model_name
-    joblib.dump({'model': best_pipeline, 'band': best_model_name.split('_')[2], 'layout': 'roi', 'training_balanced_accuracy': best_score}, artifact_path)
-    print(f"\n{'='*70}\n🏆 OVERALL WINNER: {best_model_name} (Accuracy: {best_score:.4f})\nFrozen and saved to: svm_data/{artifact_path.name}\n{'='*70}")
-
+    joblib.dump({'model': best_pipeline, 'band': winning_band, 'layout': 'roi', 'training_balanced_accuracy': best_score}, artifact_path)
+    print(f"\n{'='*70}\n🏆 OVERALL WINNER: {best_model_name} (Accuracy: {best_score:.4f})\nFrozen and saved to: svm_data/{artifact_path.name}\n{'='*70}")               
+                
     log_text = (
         f"====================================================\n"
         f" RIEMANNIAN TRAINING LOG (BEST MODEL) \n"
         f"====================================================\n"
         f"Winning Architecture:  {best_model_name.replace('.pkl', '')}\n"
-        f"Frequency Band:        {best_model_name.split('_')[2]}\n"
+        f"Frequency Band:        {winning_band.upper()}\n"
         f"Balanced Accuracy:     {best_score:.4f}\n"
-        f"Optimal Parameters:    {search.best_params_ if hasattr(search, 'best_params_') else 'N/A'}\n"
+        f"Optimal Parameters:    {best_pipeline.get_params() if not 'MDM' in best_model_name else 'N/A'}\n"
         f"Feature Extraction:    Covariance / Coherence -> Tangent Space Projection\n"
         f"Cross-Validation:      5-Fold Stratified Group CV\n"
         f"====================================================\n"
     )
     
-    log_path = SVM_DATA_DIR / f"riemann_training_report_{best_model_name.split('_')[2]}.txt"
+    log_path = SVM_DATA_DIR / f"riemann_training_report_{winning_band}.txt"
     with open(log_path, "w") as f:
         f.write(log_text)
     print(f"-> Logboek succesvol opgeslagen in: svm_data/{log_path.name}")
-    
     
 if __name__ == "__main__":
     run_comprehensive_band_selection()

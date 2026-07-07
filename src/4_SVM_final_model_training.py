@@ -116,28 +116,28 @@ def train_all_svm_models():
         # (‘split0_test_precision’, ‘mean_train_precision’ etc.)
         
         
-        # =============================================================================
-        # 5. PERMUTATION TEST
-        # =============================================================================
-        N_PERMUTATIONS = 1000
-        print(f"\n-> Running {N_PERMUTATIONS}-iteration Permutation Test (This may take a minute)...")
+        # # =============================================================================
+        # # 5. PERMUTATION TEST
+        # # =============================================================================
+        # N_PERMUTATIONS = 1000
+        # print(f"\n-> Running {N_PERMUTATIONS}-iteration Permutation Test (This may take a minute)...")
 
-        score, permutation_scores, pvalue = permutation_test_score(
-            best_svm, X_train_scaled, y_train, 
-            groups=groups_train, cv=cv_splits, 
-            n_permutations=N_PERMUTATIONS, n_jobs=-1, random_state=RANDOM_STATE, 
-            scoring='balanced_accuracy'
-        )
+        # score, permutation_scores, pvalue = permutation_test_score(
+        #     best_svm, X_train_scaled, y_train, 
+        #     groups=groups_train, cv=cv_splits, 
+        #     n_permutations=N_PERMUTATIONS, n_jobs=-1, random_state=RANDOM_STATE, 
+        #     scoring='balanced_accuracy'
+        # )
 
-        print("\nPERMUTATION TEST RESULTS:")
-        print(f"-> True Model Score (Balanced): {score:.4f}")
-        print(f"-> Mean Permuted Score: {permutation_scores.mean():.4f}")
-        print(f"-> P-value: {pvalue:.4f}")
+        # print("\nPERMUTATION TEST RESULTS:")
+        # print(f"-> True Model Score (Balanced): {score:.4f}")
+        # print(f"-> Mean Permuted Score: {permutation_scores.mean():.4f}")
+        # print(f"-> P-value: {pvalue:.4f}")
         
-        if pvalue < 0.05:
-            print("-> Conclusion: Model performs significantly better than chance (p < 0.05)!")
-        else:
-            print("-> Conclusion: Model performance is NOT statistically significant.")
+        # if pvalue < 0.05:
+        #     print("-> Conclusion: Model performs significantly better than chance (p < 0.05)!")
+        # else:
+        #     print("-> Conclusion: Model performance is NOT statistically significant.")
 
         # =============================================================================
         # 6. FREEZE AND SAVE
@@ -147,8 +147,8 @@ def train_all_svm_models():
             'scaler': scaler,
             'features': selected_features,
             'band': band_name.upper(),
-            'training_accuracy': grid_search.best_score_,
-            'p_value': pvalue
+            'training_accuracy': grid_search.best_score_
+            # Let op: p_value is hier verwijderd, dit berekenen we in Script 5
         }
 
         model_path = SVM_DATA_DIR / f"saved_model_{band_name_lower}.pkl"
