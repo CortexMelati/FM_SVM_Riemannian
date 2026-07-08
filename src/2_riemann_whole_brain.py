@@ -68,7 +68,7 @@ class AverageFrequencies(BaseEstimator, TransformerMixin):
 
 def run_whole_brain_exploration():
     total_start_time = time.time()
-    print("🚀 STARTING SCRIPT 2: FULL BRAIN EXPLORATION (19 CHANNELS - HIGHLY OPTIMIZED)")
+    print("🚀 STARTING SCRIPT 2: FULL BRAIN EXPLORATION (19 CHANNELS)")
     
     X_raw = np.load(RIEMANN_DATA_DIR / "X_train_raw.npy")
     y = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")

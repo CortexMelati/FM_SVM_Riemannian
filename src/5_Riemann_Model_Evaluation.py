@@ -98,7 +98,8 @@ def evaluate_riemann_testset():
         params = ast.literal_eval(best_row['Optimal_Params'])
         
         print(f"-> Optimal Architecture: {arch}")
-        print(f"-> Optimal Params: C={params['svm__C']}, Kernel={params['svm__kernel']}")
+        # FIX 1: Verwijder svm__ prefix
+        print(f"-> Optimal Params: C={params['C']}, Kernel={params['kernel']}")
         
         steps = [
             ('filter', MNEBandPass(l_freq, h_freq, 500)),
@@ -110,9 +111,10 @@ def evaluate_riemann_testset():
         elif arch == 'TSSVM_Xdawn':
             steps.extend([('xdawn', XdawnCovariances(nfilter=6, estimator='oas')), ('ts', TangentSpace(metric='riemann'))])
             
+        # FIX 2: Verwijder svm__ prefix in de model setup
         steps.extend([
             ('scaler', StandardScaler()),
-            ('svm', SVC(C=params['svm__C'], kernel=params['svm__kernel'], class_weight='balanced', probability=True, random_state=RANDOM_STATE))
+            ('svm', SVC(C=params['C'], kernel=params['kernel'], class_weight='balanced', probability=True, random_state=RANDOM_STATE))
         ])
         
         pipeline = Pipeline(steps)
@@ -154,10 +156,11 @@ def evaluate_riemann_testset():
         brier = brier_score_loss(y_test_sub, y_prob_sub)
         ece = expected_calibration_error(y_test_sub, y_prob_sub)
 
+        # FIX 3: Verwijder svm__ prefix in de export tabel
         final_results.append({
             'Band': band_name.upper(),
             'Optimal_Architecture': arch,
-            'Optimal_Params': f"C={params['svm__C']}, {params['svm__kernel']}",
+            'Optimal_Params': f"C={params['C']}, {params['kernel']}",
             'Bal_Accuracy': f"{acc:.2%}",
             'Sensitivity': f"{rec:.2%}",
             'Precision': f"{prec:.2%}",

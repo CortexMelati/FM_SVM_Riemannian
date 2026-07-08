@@ -54,7 +54,7 @@ class ROIExtractor(BaseEstimator, TransformerMixin):
 
 def run_roi_ablation():
     total_start_time = time.time()
-    print("🚀 STARTING SCRIPT 3: ROI ABLATION (9 CHANNELS - HIGHLY OPTIMIZED)")
+    print("STARTING SCRIPT 3: ROI ABLATION (9 CHANNELS)")
     
     scoreboard_path = RIEMANN_DATA_DIR / "scoreboard_whole_brain.csv"
     if not scoreboard_path.exists():
@@ -65,7 +65,8 @@ def run_roi_ablation():
     # We dwingen het hier naar de top 2 banden uit de verkenning
     best_bands = BEST_BANDS 
     
-    print(f"🏆 Running ROI Ablation solely on {best_bands[0].upper()} and {best_bands[1].upper()} bands.")
+    bands_str = ", ".join([b.upper() for b in best_bands])
+    print(f"🏆 Running ROI Ablation on the following bands: {bands_str}.")
 
     X_raw = np.load(RIEMANN_DATA_DIR / "X_train_raw.npy")
     y = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
@@ -88,7 +89,7 @@ def run_roi_ablation():
 
         for p_name in architectures:
             arch_start_time = time.time()
-            print(f" ⚙️ Evaluating Architecture: {p_name} ...")
+            print(f"Evaluating Architecture: {p_name} ...")
             
             X_input = X_covs if p_name == 'TSSVM_Cov' else X_raw
             fold_scores = []

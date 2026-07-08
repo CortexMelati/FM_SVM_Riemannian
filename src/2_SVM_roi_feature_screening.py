@@ -96,6 +96,8 @@ top_10_df = feature_importance.head(10)
 print(f"\nTOP 10 FEATURES WITHIN ROI ({FOCUS_BAND.upper()} Band):")
 print(top_10_df.to_string(index=False))
 
+top_5_df = feature_importance.head(5)
+
 # Save the Top 10 list so the mSFFS script can load it
 top_10_path = PROCESSED_DATA_DIR / f"top_10_roi_features_{FOCUS_BAND}.csv"
 top_10_df.to_csv(top_10_path, index=False)
@@ -104,7 +106,7 @@ print(f"-> Saved Top 10 features to {top_10_path.name}")
 # ==========================================
 # 4. PLOT TOPOGRAPHICAL NETWORK
 # ==========================================
-print("\nGenerating Topographical Map for Top 10 Features...")
+print("\nGenerating Topographical Map for Top 5 Features...")
 
 # 1. Gebruik uitsluitend de 19 klassieke kanalen (zoals in de paper)
 standard_19 = ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T7', 'C3', 'Cz', 'C4', 'T8', 'P7', 'P3', 'Pz', 'P4', 'P8', 'O1', 'O2']
@@ -125,9 +127,9 @@ for collection in ax.collections:
 sensor_offsets = ax.collections[0].get_offsets()
 ch_pos = {ch: (sensor_offsets[i, 0], sensor_offsets[i, 1]) for i, ch in enumerate(info.ch_names)}
 
-max_shap = top_10_df['Mean_Abs_SHAP'].max()
+max_shap = top_5_df['Mean_Abs_SHAP'].max()
 
-for _, row in top_10_df.iterrows():
+for _, row in top_5_df.iterrows():
     feat = row['Feature']
     node1 = feat.split('-')[0]
     node2 = feat.split('-')[1].split('(')[0]
@@ -149,11 +151,11 @@ for _, row in top_10_df.iterrows():
     except KeyError:
         pass
 
-ax.set_title(f"Top 10 Connectivity Features within ROI\n({FOCUS_BAND.upper()} Band - SHAP Importance)", fontsize=14, pad=20)
+ax.set_title(f"Top 5 Connectivity Features within ROI\n({FOCUS_BAND.upper()} Band - SHAP Importance)", fontsize=14, pad=20)
 plt.tight_layout()
 
 # Sla op met een transparante achtergrond voor in je LaTeX document
-plot_path = FIGURES_DIR / f"Figure_Intermediate_Top10_ROI_{FOCUS_BAND}.png"
+plot_path = FIGURES_DIR / f"Figure_Intermediate_Top5_ROI_{FOCUS_BAND}.png"
 plt.savefig(plot_path, dpi=300, transparent=False)
 plt.close()
 
