@@ -21,7 +21,7 @@ from pathlib import Path
 import sys
 import joblib
 import mne  # Toegevoegd voor de custom filter!
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, recall_score # recall_score toegevoegd voor Sensitivity!
 from sklearn.base import BaseEstimator, TransformerMixin  # Toegevoegd voor uitpakken
 
 current_dir = Path(__file__).resolve().parent
@@ -110,38 +110,53 @@ def evaluate_riemann_bias():
         sys.exit()
 
     merged_df['age'] = pd.to_numeric(merged_df['age'], errors='coerce')
-    merged_df['age_group'] = pd.cut(merged_df['age'], bins=[0, 40, 55, 100], labels=['<40', '40-55', '>55'])
+    # Aangepast naar de exacte labels uit je LaTeX tabel
+    merged_df['age_group'] = pd.cut(merged_df['age'], bins=[0, 40, 55, 100], labels=['< 40 years', '40 - 55 years', '> 55 years'])
 
     print(f"-> Evaluation matrix built successfully across {len(merged_df)} unique subjects.")
 
-    # 6. BEREKEN ACCURAATHEID PER SUBGROEP
+    # 6. BEREKEN ACCURAATHEID EN SENSITIVITY PER SUBGROEP
     bias_results = []
     
-    for sex in merged_df['sex'].unique():
-        sub_df = merged_df[merged_df['sex'] == sex]
-        acc = accuracy_score(sub_df['True_Label'], sub_df['Pred_Label'])
-        bias_results.append({'Factor': 'Sex', 'Subgroup': str(sex).upper(), 'Accuracy': acc, 'Sample_Size': len(sub_df)})
+    # Biologisch Geslacht
+    if 'sex' in merged_df.columns:
+        for sex in merged_df['sex'].dropna().unique():
+            sub_df = merged_df[merged_df['sex'] == sex]
+            if len(sub_df) > 0:
+                # Format geslacht naar 'Female' of 'Male' voor de tabel
+                sex_label = 'Female' if sex.lower() == 'f' else ('Male' if sex.lower() == 'm' else sex.upper())
+                
+                acc = accuracy_score(sub_df['True_Label'], sub_df['Pred_Label'])
+                sens = recall_score(sub_df['True_Label'], sub_df['Pred_Label'], pos_label=1, zero_division=0)
+                
+                bias_results.append({'Factor': 'Biological Sex', 'Subgroup': sex_label, 'Accuracy': acc, 'Sensitivity': sens, 'Sample_Size': len(sub_df)})
 
-    for age_g in merged_df['age_group'].cat.categories:
-        sub_df = merged_df[merged_df['age_group'] == age_g]
-        if len(sub_df) > 0:
-            acc = accuracy_score(sub_df['True_Label'], sub_df['Pred_Label'])
-            bias_results.append({'Factor': 'Age Group', 'Subgroup': age_g, 'Accuracy': acc, 'Sample_Size': len(sub_df)})
+    # Leeftijdscategorieën
+    if 'age_group' in merged_df.columns:
+        for age_g in merged_df['age_group'].cat.categories:
+            sub_df = merged_df[merged_df['age_group'] == age_g]
+            if len(sub_df) > 0:
+                acc = accuracy_score(sub_df['True_Label'], sub_df['Pred_Label'])
+                sens = recall_score(sub_df['True_Label'], sub_df['Pred_Label'], pos_label=1, zero_division=0)
+                
+                bias_results.append({'Factor': 'Age Category', 'Subgroup': age_g, 'Accuracy': acc, 'Sensitivity': sens, 'Sample_Size': len(sub_df)})
 
     bias_df = pd.DataFrame(bias_results)
-    print("\n🏆 RIEMANNIAN DEMOGRAPHIC PERFORMANCE MATRIX:")
-    print("-" * 60)
-    print(bias_df.to_string(index=False, float_format=lambda x: f"{x:.4f}"))
-    print("-" * 60)
+    
+    print("\n🏆 RIEMANNIAN DEMOGRAPHIC PERFORMANCE MATRIX (Ready for LaTeX):")
+    print("-" * 75)
+    print(bias_df[['Factor', 'Subgroup', 'Accuracy', 'Sensitivity', 'Sample_Size']].to_string(index=False, float_format=lambda x: f"{x:.4f}"))
+    print("-" * 75)
 
-    bias_csv_path = RIEMANN_DATA_DIR / f"riemann_demographic_bias_report_{band}.csv"
-    bias_df.to_csv(bias_csv_path, index=False, float_format='%.3f')
+    bias_csv_path = RIEMANN_DATA_DIR / f"riemann_demographic_bias_report_{band}_Xdawn.csv"
+    bias_df.to_csv(bias_csv_path, index=False, float_format='%.4f')
     
     # 7. VISUALISATIE
     plt.figure(figsize=(8, 5))
+    # Gebruik Accuracy voor de staafdiagram
     sns.barplot(data=bias_df, x='Subgroup', y='Accuracy', hue='Factor', palette='Oranges_r')
     plt.axhline(0.50, color='gray', linestyle='--', alpha=0.7, label='Chance Level (50%)')
-    plt.ylim(0, 1.0)
+    plt.ylim(0, 1.05)
     plt.ylabel('Test Accuracy', fontsize=12)
     plt.xlabel('Demographic Subgroup', fontsize=12)
     plt.title(f'Riemannian Model Fairness Check ({band.upper()} Band)\nArchitecture: TSSVM_Xdawn', fontsize=14, pad=15)

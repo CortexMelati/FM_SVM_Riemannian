@@ -41,7 +41,7 @@ def plot_msffs_curve(features_count, train_scores, cv_scores, cv_std, ci_margins
     
     # Het schaduwvlak blijft de ±1 SD (label aangepast voor statistische accuraatheid)
     plt.fill_between(x_axis, cv_scores - cv_std, cv_scores + cv_std, 
-                     color='#e6eef4', alpha=0.7, label='Standard Deviation (±1 SD)')
+                     color="#93c59e", alpha=0.7, label='Standard Deviation (±1 SD)')
     
     plt.plot(x_axis, cv_scores, marker='o', markersize=4, color='#5c8cbc', lw=1.5, label='Cross-validation accuracy')
     plt.plot(x_axis, train_scores, marker='o', markersize=4, color='#fba232', lw=1.5, label='Training accuracy')

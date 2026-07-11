@@ -30,7 +30,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import RIEMANN_DATA_DIR, SVM_DATA_DIR, RIEMANN_FIGURES_DIR, RANDOM_STATE
+from config import RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR, RANDOM_STATE
 
 class MNEBandPass(BaseEstimator, TransformerMixin):
     def __init__(self, l_freq, h_freq, sfreq=500):
@@ -48,7 +48,7 @@ def plot_complexity_curve():
 
     # 1. LAAD HET WINNENDE MODEL & DATA
     model_name = "model_riemann_Theta_roi_TSSVM_Xdawn.pkl"
-    model_path = SVM_DATA_DIR / model_name
+    model_path = RIEMANN_DATA_DIR / model_name
     if not model_path.exists():
         sys.exit(f"🚨 Model {model_name} niet gevonden!")
         

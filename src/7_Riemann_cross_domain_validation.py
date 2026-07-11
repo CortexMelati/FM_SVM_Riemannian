@@ -71,7 +71,6 @@ def run_unified_cross_domain():
 
     # FIX 1: We checken nu automatisch beide banden die je in Script 3 hebt getest
     target_models = [
-        "model_riemann_Delta_roi_TSSVM_Xdawn.pkl",
         "model_riemann_Theta_roi_TSSVM_Xdawn.pkl"
     ]
     

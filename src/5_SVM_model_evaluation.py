@@ -178,35 +178,63 @@ def evaluate_all_svm_bands():
         print("-> Predicting on Unseen Data...")
         y_pred = final_svm.predict(X_test_scaled)
         y_prob = final_svm.predict_proba(X_test_scaled)[:, 1]
+        
+        # 3. EXTERNAL VALIDATION (Subject-Level & Metrics)
+        print("-> Predicting on Unseen Data (Epoch Level)...")
+        y_pred_epochs = final_svm.predict(X_test_scaled)
+        y_prob_epochs = final_svm.predict_proba(X_test_scaled)[:, 1]
 
-        acc = accuracy_score(y_test, y_pred)
-        prec = precision_score(y_test, y_pred, zero_division=0)
-        rec = recall_score(y_test, y_pred, zero_division=0)
-        auc = roc_auc_score(y_test, y_prob)
-        auprc = average_precision_score(y_test, y_prob) 
-        brier = brier_score_loss(y_test, y_prob)
-        ece = expected_calibration_error(y_test, y_prob)
+        # --- APPLY MAJORITY VOTING FOR SUBJECT-LEVEL EVALUATION ---
+        print("-> Aggregating predictions to Subject-Level...")
+        df_preds = pd.DataFrame({
+            'Subject': test_df['Subject'].values,
+            'True_Label': y_test,
+            'Pred_Class': y_pred_epochs,
+            'Pred_Prob': y_prob_epochs
+        })
+
+        # Calculate the majority vote and average probability per subject
+        df_subject = df_preds.groupby('Subject').agg(
+            True_Label=('True_Label', 'first'), 
+            Pred_Class=('Pred_Class', lambda x: x.mode()[0]), # Majority Vote
+            Pred_Prob=('Pred_Prob', 'mean') # Average confidence
+        ).reset_index()
+
+        # Extract arrays for metric calculation
+        y_test_sub = df_subject['True_Label'].values
+        y_pred_sub = df_subject['Pred_Class'].values
+        y_prob_sub = df_subject['Pred_Prob'].values
+
+        print(f"-> Evaluation compressed from {len(y_test)} epochs to {len(y_test_sub)} unique subjects.")
+
+        # --- CALCULATE METRICS ---
+        # Let op: de metrics gebruiken nu de '_sub' variabelen!
+        acc = accuracy_score(y_test_sub, y_pred_sub)
+        prec = precision_score(y_test_sub, y_pred_sub, zero_division=0)
+        rec = recall_score(y_test_sub, y_pred_sub, zero_division=0)
+        auc = roc_auc_score(y_test_sub, y_prob_sub)
+        auprc = average_precision_score(y_test_sub, y_prob_sub) 
+        brier = brier_score_loss(y_test_sub, y_prob_sub)
+        ece = expected_calibration_error(y_test_sub, y_prob_sub)
         
         n_permutations = 1000
         permuted_scores = []
         for i in range(n_permutations):
-            # Hussel de test labels willekeurig
-            y_test_shuffled = shuffle(y_test, random_state=RANDOM_STATE + i)
-            # Bereken de accuraatheid van het ongewijzigde model op de gehusselde labels
-            score = balanced_accuracy_score(y_test_shuffled, y_pred)
+            # Hussel de test labels willekeurig subject lvl
+            y_test_shuffled = shuffle(y_test_sub, random_state=RANDOM_STATE + i)
+            score = balanced_accuracy_score(y_test_shuffled, y_pred_sub)
             permuted_scores.append(score)
 
         # Bereken de p-waarde (hoe vaak was de gehusselde score gelijk aan of beter dan de echte score?)
         pvalue = (np.sum(np.array(permuted_scores) >= acc) + 1) / (n_permutations + 1)
 
-        print(f"\nPERMUTATION TEST (Test Set):")
+        print(f"\nPERMUTATION TEST (Test Set - Subject Level):")
         print(f"-> True Model Accuracy: {acc:.4f}")
         print(f"-> P-value: {pvalue:.4f}")
 
         # Log metrics to final results table
         # Extract C, gamma, kernel from the final_svm model (assuming it's an SVC)
-        opt_params = f"C={final_svm.C}, g={final_svm.gamma:.4f}, {final_svm.kernel}"
-        
+        opt_params = f"C={final_svm.C}, g={final_svm.gamma:.4f}, {final_svm.kernel}"        
         final_results.append({
             'Band': band_name.upper(),
             'Optimal_Params': opt_params,
@@ -217,13 +245,13 @@ def evaluate_all_svm_bands():
             'AUROC': f"{auc:.4f}",
             'Brier': f"{brier:.4f}",
             'ECE': f"{ece:.4f}",
-            'Permutation_P': f"{pvalue:.4f}"  # <--- P-waarde netjes toegevoegd aan je LaTeX tabel!
+            'Permutation_P': f"{pvalue:.4f}"  
         })
 
         # Save Individual Text Report
         report_text = (
             f"====================================================\n"
-            f" FINAL TEST SET METRICS - {band_name.upper()} BAND \n"
+            f" FINAL TEST SET METRICS SUBJECT - {band_name.upper()} BAND \n"
             f"====================================================\n"
             f"Accuracy:        {acc:.4f}\n"
             f"Precision:       {prec:.4f}\n"
@@ -240,22 +268,22 @@ def evaluate_all_svm_bands():
             f.write(report_text)
 
         # Plot Confusion Matrix
-        cm = confusion_matrix(y_test, y_pred)
+        cm = confusion_matrix(y_test_sub, y_pred_sub)
         plt.figure(figsize=(6, 5))
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
                     xticklabels=['Healthy (0)', 'Fibro (1)'], 
                     yticklabels=['Healthy (0)', 'Fibro (1)'],
                     annot_kws={"size": 16})
-        plt.title(f'{band_name.upper()} Band FINAL Validation\n(Accuracy: {acc:.2%})', fontsize=14)
-        plt.ylabel('True Label', fontsize=12)
-        plt.xlabel('Predicted Label', fontsize=12)
+        plt.title(f'{band_name.upper()} Band FINAL Validation\nSubject-Level (Accuracy: {acc:.2%})', fontsize=14)
+        plt.ylabel('True Clinical Diagnosis', fontsize=12)
+        plt.xlabel('Predicted Diagnosis', fontsize=12)
         plt.tight_layout()
         plt.savefig(SVM_FIGURES_DIR / f"final_confusion_matrix_{band_name_lower}.png", dpi=300, facecolor='white', bbox_inches='tight')
         plt.close()
 
         # 4. GENERATE FIGURE 5 (t-SNE Projection)
         print(f"  -> Generating t-SNE data distribution (Fig 5)...")
-        tsne = TSNE(n_components=2, perplexity=min(30, len(X_test_scaled)-1), random_state=42)
+        tsne = TSNE(n_components=2, perplexity=min(30, len(X_test_scaled)-1), random_state=RANDOM_STATE)
         X_tsne = tsne.fit_transform(X_test_scaled)
 
         plt.figure(figsize=(8, 6))
@@ -332,63 +360,49 @@ def evaluate_all_svm_bands():
 
         # 6. ALGORITHMIC BIAS EVALUATION (Demographics)
         if participants_df is not None:
-            print("  -> Evaluating Algorithmic Bias for Demographic Subgroups...")
-            test_df_band = test_df.copy()
-            test_df_band['SVM_Pred'] = y_pred
+            print("  -> Evaluating Algorithmic Bias for Demographic Subgroups (Subject Level)...")
             
-            merged_df = pd.merge(test_df_band, participants_df, on='Subject', how='inner')
+            # Koppel direct df_subject (waarin per patiënt 1 rij staat) aan de demografische data
+            merged_df = pd.merge(df_subject, participants_df, on='Subject', how='inner')
 
             if not merged_df.empty:
                 merged_df['age'] = pd.to_numeric(merged_df['age'], errors='coerce')
-                merged_df['age_group'] = pd.cut(merged_df['age'], bins=[0, 40, 55, 100], labels=['<40', '40-55', '>55'])
+                merged_df['age_group'] = pd.cut(merged_df['age'], bins=[0, 40, 55, 100], labels=['< 40 years', '40 - 55 years', '> 55 years'])
 
                 bias_results = []
+                
                 def evaluate_subgroup(df_sub, category_name, category_value):
                     n_samples = len(df_sub)
                     if n_samples == 0: return
-                    y_t = df_sub['Target']
-                    y_p = df_sub['SVM_Pred']
+                    
+                    y_t = df_sub['True_Label']
+                    y_p = df_sub['Pred_Class']
+                    
                     bias_results.append({
-                        'Category': category_name, 'Group': category_value, 'N_Segments': n_samples,
+                        'Category': category_name, 'Group': category_value, 'N_Subjects': n_samples,
                         'Accuracy': round(accuracy_score(y_t, y_p), 4),
                         'Sensitivity': round(recall_score(y_t, y_p, pos_label=1, zero_division=0), 4),
-                        'Specificity': round(recall_score(y_t, y_p, pos_label=0, zero_division=0), 4)
                     })
 
                 if 'sex' in merged_df.columns:
                     for sex in merged_df['sex'].dropna().unique():
-                        evaluate_subgroup(merged_df[merged_df['sex'] == sex], 'Sex', sex.upper())
+                        sex_label = 'Female' if sex.lower() == 'f' else ('Male' if sex.lower() == 'm' else sex.upper())
+                        evaluate_subgroup(merged_df[merged_df['sex'] == sex], 'Biological Sex', sex_label)
                 if 'age_group' in merged_df.columns:
                     for age_grp in merged_df['age_group'].dropna().unique():
-                        evaluate_subgroup(merged_df[merged_df['age_group'] == age_grp], 'Age', age_grp)
+                        evaluate_subgroup(merged_df[merged_df['age_group'] == age_grp], 'Age Category', age_grp)
 
                 if bias_results:
                     bias_df = pd.DataFrame(bias_results).sort_values(by=['Category', 'Group'])
                     bias_path = SVM_DATA_DIR / f"svm_algorithmic_bias_report_{band_name_lower}.csv"
                     bias_df.to_csv(bias_path, index=False)
                     
-                    # Generate Bias Visualization
-                    plt.figure(figsize=(10, 6))
-                    sns.barplot(
-                        data=bias_df, x='Group', y='Accuracy', hue='Category', 
-                        dodge=False, palette='Set2', edgecolor='black'
-                    )
-                    plt.axhline(y=0.5, color='#d62728', linestyle='--', alpha=0.8, label='Chance Level (50%)')
-                    plt.title(f"Algorithmic Bias Evaluation\n({band_name.upper()} Band - Test Set Accuracy per Subgroup)", fontsize=14, pad=15)
-                    plt.ylim(0, 1.05)
-                    plt.ylabel("Accuracy", fontsize=12)
-                    plt.xlabel("Demographic Subgroup", fontsize=12)
-                    plt.legend(title="Demographic Category", bbox_to_anchor=(1.05, 1), loc='upper left', frameon=True)
-                    plt.xticks(rotation=45, ha='right')
-                    ax = plt.gca()
-                    ax.spines['top'].set_visible(False)
-                    ax.spines['right'].set_visible(False)
-                    plt.tight_layout()
+                    # Print voor je LaTeX tabel
+                    print(f"\n--- SVM BIAS REPORT FOR {band_name.upper()} ---")
+                    print(bias_df[['Category', 'Group', 'Accuracy', 'Sensitivity']].to_string(index=False))
+                    print("---------------------------------------\n")
                     
-                    bias_fig_path = SVM_FIGURES_DIR / f"Figure_Bias_Evaluation_{band_name_lower}.png"
-                    plt.savefig(bias_fig_path, dpi=300, facecolor='white', bbox_inches='tight')
-                    plt.close()
-
+                    
     # =============================================================================
     # 7. EXPORT MASTER TABLE FOR LATEX
     # =============================================================================

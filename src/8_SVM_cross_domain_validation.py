@@ -109,7 +109,7 @@ fold_range = range(2, max_safe_folds + 1)
 
 results = []
 
-# --- NIEUW: Opslag voor de uiteindelijke Confusion Matrix ---
+# confusion matrix 
 final_y_true = []
 final_y_pred_transfer = []
 final_subjects = []
