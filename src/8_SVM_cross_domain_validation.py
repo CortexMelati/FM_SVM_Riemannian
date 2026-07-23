@@ -1,3 +1,42 @@
+Bug found, edit this part:
+
+# Haal de ruwe data op voor deze fold (onge-schaald)
+        X_tgt_tr_raw = target_df[selected_features].values[train_idx]
+        X_tgt_te_raw = target_df[selected_features].values[test_idx]
+        y_tgt_tr, y_tgt_te = y_target[train_idx], y_target[test_idx]
+        
+        num_subjects_in_fold = len(np.unique(groups_target[train_idx]))
+        train_subjects_count.append(num_subjects_in_fold)
+        
+        # ---------------------------------------------------------
+        # Method 1: DIRECT TRAINING (Volledig onafhankelijk)
+        # ---------------------------------------------------------
+        # Fit een nieuwe scaler STRICT op de target training data van deze fold
+        direct_scaler = StandardScaler()
+        X_tgt_tr_direct = direct_scaler.fit_transform(X_tgt_tr_raw)
+        X_tgt_te_direct = direct_scaler.transform(X_tgt_te_raw)
+        
+        direct_svm = SVC(C=frozen_svm.C, gamma=frozen_svm.gamma, kernel='rbf', random_state=RANDOM_STATE)
+        direct_svm.fit(X_tgt_tr_direct, y_tgt_tr)
+        acc_direct = balanced_accuracy_score(y_tgt_te, direct_svm.predict(X_tgt_te_direct))
+        direct_scores.append(acc_direct)
+        
+        # ---------------------------------------------------------
+        # Method 2: TRANSFER LEARNING (TrAdaBoost)
+        # ---------------------------------------------------------
+        # Hier gebruiken we de originele Source scaler (wat methodologisch klopt voor transfer learning)
+        X_tgt_tr_transfer = scaler.transform(X_tgt_tr_raw)
+        X_tgt_te_transfer = scaler.transform(X_tgt_te_raw)
+        
+        boost_base = SVC(C=frozen_svm.C, gamma=frozen_svm.gamma, kernel='rbf', probability=True, random_state=RANDOM_STATE)
+        tr_model = TrAdaBoost(estimator=boost_base, n_estimators=50, random_state=RANDOM_STATE)
+        tr_model.fit(X_source, y_source, Xt=X_tgt_tr_transfer, yt=y_tgt_tr)
+        
+        tgt_pred = tr_model.predict(X_tgt_te_transfer)
+        acc_transfer = balanced_accuracy_score(y_tgt_te, tgt_pred)
+        transfer_scores.append(acc_transfer)
+
+
 """
 =============================================================================
 8. CROSS-DOMAIN VALIDATION & TRADABOOST (Li et al., 2026 Replication)
