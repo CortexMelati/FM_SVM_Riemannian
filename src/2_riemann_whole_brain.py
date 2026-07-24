@@ -107,7 +107,7 @@ def run_whole_brain_exploration():
                 best_params_log = "N/A"
             
             else:
-                # Voeg TQDM toe aan de 10 repeats # select 2 to 5 to find the best model, then put it on 10 rep if you want to do it on the best model
+                # Voeg TQDM toe aan de 10 repeats # select range(2 to 5) to find the best model, then put it on 10 rep if you want to do it on the best model
                 for r in tqdm(range(2), desc=f"   🔄 {p_name}", leave=False, colour='cyan'):
                     cv = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE + r)
                     for train_idx, val_idx in cv.split(X_input, y, groups):
