@@ -10,9 +10,9 @@ dependencies:
   - scipy
   - pandas
   - matplotlib
-  - xlrd
-  - pip
-
-  - pip:
-    - pyriemann
-    - openpyxl
+  - scikit-learn
+  - shap
+  - pyriemann
+  - openpyxl
+  - ipykernel      # Aanbevolen: Jupyter Notebooks
+  # - xlrd         # Alleen aanzetten als je écht oude .xls files moet inlezen

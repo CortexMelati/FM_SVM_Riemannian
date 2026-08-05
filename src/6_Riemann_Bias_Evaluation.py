@@ -20,8 +20,8 @@ import seaborn as sns
 from pathlib import Path
 import sys
 import joblib
-import mne  # Toegevoegd voor de custom filter!
-from sklearn.metrics import accuracy_score, recall_score # recall_score toegevoegd voor Sensitivity!
+import mne  
+from sklearn.metrics import accuracy_score, recall_score 
 from sklearn.base import BaseEstimator, TransformerMixin  # Toegevoegd voor uitpakken
 
 current_dir = Path(__file__).resolve().parent

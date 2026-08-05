@@ -29,7 +29,7 @@ CHRONIC_PAIN_DIR = DATA_ROOT / "Chronicpainset" # Chronic Pain dataset
 # NOT_USABLE_DIR = DATA_ROOT / "OSF_mj9xr_notusable" # Ignored by the pipeline
 
 # ==========================================
-# ABLATION SWITCH (Centralized)
+# ABLATION SWITCH (Centralized) Not in use
 # ==========================================
 # True  = Benchmark mode (9 Central Channels - prevents EMG artifacts)
 # False = Exploratory mode (All 19 Channels)
@@ -71,8 +71,9 @@ BEST_BANDS = ['Theta', 'Gamma'] #whole brain = theta and gamma, ROI = Theta and 
 
 
 # Internal Cross-Domain Validation cohorts (matched with participants.tsv 'study' column)
-CROSS_SOURCE_DATASET = "FM"    # Primary cohort for Train/Test
-CROSS_TARGET_DATASET = "NCCP"  # Isolated cohort for Transfer Learning
+CROSS_SOURCE_DATASET = "FM"             # Primary cohort for Train/Test
+CROSS_TARGET_DATASET = "NCCP"           # Isolated cohort for Transfer Learning/Direct training
+# CROSS_TARGET_DATASET = ["NCCP", "CBP"]  # Isolated cohort for Transfer Learning/Direct training option, will try later outside of thesis scope
 
 # ==========================================
 # 2. PREPROCESSING & TIMING PARAMETERS (Li et al., 2026)

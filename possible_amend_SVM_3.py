@@ -39,7 +39,7 @@ def run_msffs_all_bands():
         pool_of_20_features = top_10_features + remaining_roi[:10]
         X_train_roi = X_train_full[pool_of_20_features]
 
-        # ... [Hier komt jouw bestaande mSFFS logica, scaling en K-fold] ...
+        # ... [Hier komt bestaande mSFFS logica, scaling en K-fold] ...
 
         # D. Sla alles dynamisch op met de band_name_lower in de bestandsnaam
         plot_msffs_curve(f_counts, np.array(tr_scores), np.array(cv_scores), np.array(cv_stds), band_name_lower)

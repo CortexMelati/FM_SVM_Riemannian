@@ -41,7 +41,7 @@ from config import RANDOM_STATE, BANDS, BEST_BANDS, RIEMANN_DATA_DIR, SFREQ_MAP,
 # =============================================================================
 # TOGGLE: TRUE = 19 Channels (WHOLE) | FALSE = 9 Channels (ROI)
 # =============================================================================
-RUN_AS_WHOLE_BRAIN = True
+RUN_AS_WHOLE_BRAIN = False
 # =============================================================================
 
 SFREQ = SFREQ_MAP.get(ACTIVE_DATASET_NAME, 500)

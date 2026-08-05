@@ -31,11 +31,15 @@ def plot_surrogate_riemannian_weights():
     print("🚀 STARTING SCRIPT 4: DYNAMIC TOPOGRAPHICAL NETWORK MAPPING")
     
     # 1. LEES DE WINNENDE BANDEN UIT SCRIPT 3
-    scoreboard_path = RIEMANN_DATA_DIR / "scoreboard_roi_ablation.csv"
+    scoreboard_path = RIEMANN_DATA_DIR / "riemann_comprehensive_scoreboard.csv"
     if not scoreboard_path.exists():
         sys.exit(f"🚨 Scoreboard niet gevonden! Draai Script 3 eerst.")
         
-    df_roi = pd.read_csv(scoreboard_path)
+    df_all = pd.read_csv(scoreboard_path)
+    
+    # Filter specifiek op de ROI resultaten
+    df_roi = df_all[df_all['Layout'] == 'ROI'].copy()
+    
     # Pak unieke banden die geëvalueerd zijn op ROI niveau
     winning_bands = df_roi['Band'].unique().tolist()
     
