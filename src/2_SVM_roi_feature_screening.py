@@ -45,6 +45,10 @@ y_train = train_df['Target'].values
 meta_cols = ['Subject', 'Target', 'Condition', 'Segment']
 X_train_full = train_df.drop(columns=[c for c in meta_cols if c in train_df.columns])
 
+band_features = [col for col in X_train_full.columns if f'({FOCUS_BAND})' in col]
+original_feature_count = len(band_features)
+print(f"-> Total theoretical connections in {FOCUS_BAND.upper()} band (19 channels): {original_feature_count}")
+
 # Filter to only include features where BOTH channels are in the ROI and in the Focus Band
 roi_features = []
 for col in X_train_full.columns:
@@ -53,8 +57,13 @@ for col in X_train_full.columns:
         if pair[0] in BEST_CHANNELS_EVALUATE and pair[1] in BEST_CHANNELS_EVALUATE:
             roi_features.append(col)
 
+
 X_train_roi = X_train_full[roi_features]
-print(f"-> Filtered to {len(roi_features)} features (9 ROI channels, {FOCUS_BAND.upper()} band).")
+reduced_feature_count = len(roi_features)
+reduction_pct = (1 - (reduced_feature_count / original_feature_count)) * 100
+
+print(f"-> Applied strict spatial filtering to the {len(BEST_CHANNELS_EVALUATE)}-channel Central ROI.")
+print(f"-> Feature space successfully reduced from {original_feature_count} to {reduced_feature_count} features (-{reduction_pct:.1f}%).")
 
 # ==========================================
 # 2. SCALING AND SVM TRAINING

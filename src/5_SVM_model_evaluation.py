@@ -119,6 +119,37 @@ def plot_svm_network_map(shap_values_fm, feature_names, target_band):
     plt.savefig(plot_path, dpi=300, transparent=True) 
     plt.close()
 
+def plot_permutation_distribution(permuted_scores, actual_acc, pvalue, target_band):
+    print(f"  -> Generating Permutation Test Distribution Plot for {target_band.upper()} band...")
+    
+    plt.figure(figsize=(8, 6))
+    plt.hist(permuted_scores, bins=30, color='#93c59e', edgecolor='black', alpha=0.7, density=True, label='Permuted Scores (Null Distribution)')
+    
+    # Lijn voor de daadwerkelijke model score
+    plt.axvline(actual_acc, color='#d62728', linestyle='dashed', linewidth=2.5, 
+                label=f'Actual Model Score ({actual_acc:.4f})')
+    
+    # Lijn voor het gemiddelde toevalsniveau
+    plt.axvline(np.mean(permuted_scores), color='black', linestyle='dotted', linewidth=2, 
+                label=f'Chance Level (Mean: {np.mean(permuted_scores):.4f})')
+
+    plt.title(f"Permutation Test Distribution (1000 Iterations)\n({target_band.upper()} Band - p = {pvalue:.4f})", fontsize=12, pad=15)
+    plt.xlabel('Balanced Accuracy', fontsize=11)
+    plt.ylabel('Density', fontsize=11)
+    plt.legend(frameon=True, loc='upper right')
+
+    ax = plt.gca()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    plt.tight_layout()
+    
+    SVM_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    plot_path = SVM_FIGURES_DIR / f"Figure_Permutation_Distribution_{target_band}.png"
+    plt.savefig(plot_path, dpi=300, facecolor='white', bbox_inches='tight')
+    plt.close()
+    print(f"  -> Permutation plot saved to svm_figures/{plot_path.name}")
+
 
 def evaluate_all_svm_bands():
     print("🚀 STARTING STEP 5: AUTOMATED SVM EVALUATION FOR ALL BANDS")
@@ -217,6 +248,11 @@ def evaluate_all_svm_bands():
         brier = brier_score_loss(y_test_sub, y_prob_sub)
         ece = expected_calibration_error(y_test_sub, y_prob_sub)
         
+        # Berekening van False Positive Rate (FPR) en False Negative Rate (FNR)
+        tn, fp, fn, tp = confusion_matrix(y_test_sub, y_pred_sub).ravel()
+        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+        fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
+        
         n_permutations = 1000
         permuted_scores = []
         for i in range(n_permutations):
@@ -232,6 +268,9 @@ def evaluate_all_svm_bands():
         print(f"-> True Model Accuracy: {acc:.4f}")
         print(f"-> P-value: {pvalue:.4f}")
 
+        plot_permutation_distribution(permuted_scores, acc, pvalue, band_name_lower)
+        
+    
         # Log metrics to final results table
         # Extract C, gamma, kernel from the final_svm model (assuming it's an SVC)
         opt_params = f"C={final_svm.C}, g={final_svm.gamma:.4f}, {final_svm.kernel}"        
@@ -241,6 +280,8 @@ def evaluate_all_svm_bands():
             'Bal_Accuracy': f"{acc:.2%}",
             'Sensitivity': f"{rec:.2%}",
             'Precision': f"{prec:.2%}",
+            'FPR': f"{fpr:.2%}",
+            'FNR': f"{fnr:.2%}",
             'AUPRC': f"{auprc:.4f}",
             'AUROC': f"{auc:.4f}",
             'Brier': f"{brier:.4f}",
@@ -256,6 +297,8 @@ def evaluate_all_svm_bands():
             f"Accuracy:        {acc:.4f}\n"
             f"Precision:       {prec:.4f}\n"
             f"Recall:          {rec:.4f}\n"
+            f"FPR:             {fpr:.4f}\n"
+            f"FNR:             {fnr:.4f}\n"
             f"ROC-AUC:         {auc:.4f}\n"
             f"AUPRC:           {auprc:.4f}\n"
             f"Brier Score:     {brier:.4f}\n"

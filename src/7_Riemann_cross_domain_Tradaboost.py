@@ -13,7 +13,7 @@ Overview:
     Automatically generates comparative tables and figures for both architectures.
 
 Execution:
-    python 7_Riemann_cross_domain_validation.py
+    python 7_Riemann_cross_domain_Tradaboost.py
 =============================================================================
 """
 
@@ -30,7 +30,7 @@ from tqdm import tqdm
 
 from sklearn.svm import SVC
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import balanced_accuracy_score
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.base import BaseEstimator, TransformerMixin
 
@@ -38,7 +38,6 @@ from sklearn.base import BaseEstimator, TransformerMixin
 warnings.filterwarnings("ignore")
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# Import adapt only if necessary, use try-except to avoid crash
 try:
     from adapt.instance_based import TrAdaBoost
     HAS_ADAPT = True
@@ -51,9 +50,6 @@ sys.path.append(str(current_dir.parent))
 
 from config import RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR, CROSS_TARGET_DATASET, RANDOM_STATE
 
-# =========================================================================
-# BLAUWDRUKKEN: Nodig om de Xdawn pipeline uit te pakken
-# =========================================================================
 class MNEBandPass(BaseEstimator, TransformerMixin):
     def __init__(self, l_freq, h_freq, sfreq=500):
         self.l_freq, self.h_freq, self.sfreq = l_freq, h_freq, sfreq
@@ -64,12 +60,11 @@ class ROIExtractor(BaseEstimator, TransformerMixin):
     def __init__(self, indices): self.indices = indices
     def fit(self, X, y=None): return self
     def transform(self, X): return X[:, self.indices, :]
-# =========================================================================
+
 
 def run_unified_cross_domain():
     print("🚀 STARTING SCRIPT 7: UNIFIED RIEMANNIAN CROSS-DOMAIN VALIDATION")
 
-    # FIX 1: We checken nu automatisch beide banden die je in Script 3 hebt getest
     target_models = [
         "model_riemann_Theta_roi_TSSVM_Xdawn.pkl"
     ]
@@ -77,7 +72,6 @@ def run_unified_cross_domain():
     for model_name in target_models:
         model_path = RIEMANN_DATA_DIR / model_name
         if not model_path.exists():
-            # In plaats van een dikke error, geeft hij nu gewoon aan dat hij deze specifieke band overslaat.
             print(f"\n-> Info: Model {model_name} niet gevonden. Gaan door naar de volgende...")
             continue
             
@@ -89,11 +83,9 @@ def run_unified_cross_domain():
         band = artifact['band']
         layout = artifact['layout']
         
-        # Knip de feature extractor (FE) en SVM los
         fe_pipeline = Pipeline(full_pipeline.steps[:-1])
         frozen_svm = full_pipeline.named_steps['svm'] 
         
-        # Labels en groepen ophalen (voor Source en Target)
         y_source = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
         y_target = np.load(RIEMANN_DATA_DIR / f"target_y_{CROSS_TARGET_DATASET.lower()}.npy")
         groups_target = np.load(RIEMANN_DATA_DIR / f"target_groups_{CROSS_TARGET_DATASET.lower()}.npy")
@@ -115,16 +107,13 @@ def run_unified_cross_domain():
                 sys.exit(f"🚨 Target data mist: {target_path.name}. Voeg de save-regel toe in script 1!")
             X_target_input = np.load(target_path)
 
-        # 3. Projecteer de data met de bevroren pijplijn
         print("-> Projecting Source & Target to the unified Tangent Space...")
         X_source = fe_pipeline.transform(X_source_input)
         X_target = fe_pipeline.transform(X_target_input)
 
-        # 4. TRADABOOST ITERATION (Met Dynamische Folds)
         df_target_subs = pd.DataFrame({'Subject': groups_target, 'Label': y_target}).drop_duplicates()
         class_counts = df_target_subs['Label'].value_counts()
         
-        # 10 folds is ruim voldoende om een trend te bewijzen zonder dat het uren duurt.
         max_folds = 10 
         results = []
 
@@ -145,45 +134,42 @@ def run_unified_cross_domain():
                 train_subs.append(len(np.unique(groups_target[train_idx])))
                 
                 # Method 1: DIRECT
-                d_svm = SVC(C=frozen_svm.C, kernel=frozen_svm.kernel, class_weight='balanced', random_state=RANDOM_STATE, max_iter=2000, cache_size=1000)
+                d_svm = SVC(C=frozen_svm.C, kernel=frozen_svm.kernel, class_weight='balanced', random_state=RANDOM_STATE)
                 d_svm.fit(X_tgt_tr, y_tgt_tr)
                 pred_d = d_svm.predict(X_tgt_te)
                 
-                # Method 2: TRANSFER (Veilige Try/Except)
-                pred_tr = pred_d.copy() # Default naar Direct als Transfer faalt
+                # Method 2: TRANSFER
+                pred_tr = pred_d.copy() 
                 if HAS_ADAPT:
                     try:
-                        boost = SVC(C=frozen_svm.C, kernel=frozen_svm.kernel, class_weight='balanced', probability=True, random_state=RANDOM_STATE, max_iter=1000, cache_size=1000)
+                        boost = SVC(C=frozen_svm.C, kernel=frozen_svm.kernel, class_weight='balanced', probability=True, random_state=RANDOM_STATE)
                         tr = TrAdaBoost(estimator=boost, n_estimators=5, random_state=RANDOM_STATE, verbose=0)
                         
-                        # Catch warnings om spam in de terminal te voorkomen
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore")
                             tr.fit(X_source, y_source, Xt=X_tgt_tr, yt=y_tgt_tr)
                             
                         pred_tr = tr.predict(X_tgt_te)
                     except Exception:
-                        pass # Val terug op Direct accuraatheid als de loop crasht
+                        pass 
                 
-                # Subject-Level Voting
+                # FIX: Subject-Level Voting met Balanced Accuracy!
                 df_fold = pd.DataFrame({'Subject': groups_target[test_idx], 'True': y_tgt_te, 'Dir': pred_d, 'Trans': pred_tr})
                 df_sub = df_fold.groupby('Subject').agg(True_L=('True', 'first'), V_Dir=('Dir', lambda x: x.mode()[0]), V_Tr=('Trans', lambda x: x.mode()[0])).reset_index()
                 
-                direct_scores.append(accuracy_score(df_sub['True_L'], df_sub['V_Dir']))
-                transfer_scores.append(accuracy_score(df_sub['True_L'], df_sub['V_Tr']))
+                direct_scores.append(balanced_accuracy_score(df_sub['True_L'], df_sub['V_Dir']))
+                transfer_scores.append(balanced_accuracy_score(df_sub['True_L'], df_sub['V_Tr']))
                 
-            # Schrijf de resultaten per fold strak naar de console
             tqdm.write(f"{n_splits:<10} | {np.mean(train_subs):<15.1f} | {np.mean(transfer_scores):<15.3f} | {np.mean(direct_scores):<15.3f}")
             results.append({'Total_Folds': n_splits, 'Avg_Train_Subjects': np.mean(train_subs), 'Transfer_Learning': np.mean(transfer_scores), 'Direct_Training': np.mean(direct_scores)})
             
-        # 5. OPSLAAN & PLOTTEN
         if results:
             results_df = pd.DataFrame(results)
             results_df.to_csv(RIEMANN_DATA_DIR / f"Table_1_Riemann_cross_domain_{band}_{arch_name}.csv", index=False)
             
             plt.figure(figsize=(9, 6))
             plt.scatter(results_df['Avg_Train_Subjects'], results_df['Direct_Training'], color='#5c8cbc', label='Direct Training', s=60, alpha=0.9, edgecolor='white')
-            plt.scatter(results_df['Avg_Train_Subjects'], results_df['Transfer_Learning'], color='#d62728', label='Transfer Learning', s=60, alpha=0.9, edgecolor='white')
+            plt.scatter(results_df['Avg_Train_Subjects'], results_df['Transfer_Learning'], color='#d62728', label='Transfer Learning (TrAdaBoost)', s=60, alpha=0.9, edgecolor='white')
 
             z_dir = np.polyfit(results_df['Avg_Train_Subjects'], results_df['Direct_Training'], 1)
             plt.plot(results_df['Avg_Train_Subjects'], np.poly1d(z_dir)(results_df['Avg_Train_Subjects']), color='gray', lw=2.5, alpha=0.8)
@@ -192,8 +178,8 @@ def run_unified_cross_domain():
             plt.plot(results_df['Avg_Train_Subjects'], np.poly1d(z_trans)(results_df['Avg_Train_Subjects']), color='gray', lw=2.5, alpha=0.8)
 
             plt.title(f"Riemannian Fig 7: Cross-domain validation on {CROSS_TARGET_DATASET}\nArchitecture: {arch_name}", fontsize=13, pad=15)
-            plt.xlabel('Mean training subjects', fontsize=12)
-            plt.ylabel('Mean test accuracy', fontsize=12)
+            plt.xlabel('Mean target training subjects', fontsize=12)
+            plt.ylabel('Mean balanced test accuracy', fontsize=12)
             
             ax = plt.gca()
             ax.spines['top'].set_visible(False)
