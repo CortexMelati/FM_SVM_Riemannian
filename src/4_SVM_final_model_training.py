@@ -142,13 +142,16 @@ def train_all_svm_models():
         # =============================================================================
         # 6. FREEZE AND SAVE
         # =============================================================================
+        best_idx = grid_search.best_index_
+        std_score = grid_search.cv_results_['std_test_score'][best_idx]
+
         model_artifact = {
             'model': best_svm,
             'scaler': scaler,
             'features': selected_features,
             'band': band_name.upper(),
-            'training_accuracy': grid_search.best_score_
-            # Let op: p_value is hier verwijderd, dit berekenen we in Script 5
+            'training_accuracy': grid_search.best_score_,
+            'training_std': std_score # Sla de STD op in het artefact!
         }
 
         model_path = SVM_DATA_DIR / f"saved_model_{band_name_lower}.pkl"

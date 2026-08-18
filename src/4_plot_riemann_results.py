@@ -147,6 +147,16 @@ def plot_surrogate_riemannian_weights():
                 pass
 
         ax.set_title(f"Riemannian TS-SVM Connectivity\n({band_name} Band - Linear Surrogate)", fontsize=14, pad=20)
+        
+        # --- NIEUW: Voeg handmatig een legenda toe voor de lijnkleuren/diktes ---
+        from matplotlib.lines import Line2D
+        legend_elements = [
+            Line2D([0], [0], color='#FF8C94', lw=5.0, label='Top 20% Impact'),
+            Line2D([0], [0], color='#8B4513', lw=3.5, label='Top 20-60% Impact'),
+            Line2D([0], [0], color='#228B22', lw=2.0, label='Bottom 40% Impact')
+        ]
+        ax.legend(handles=legend_elements, loc='lower left', title="Mathematical Vector Importance", fontsize=10)
+
         plt.tight_layout()
         
         save_path = RIEMANN_FIGURES_DIR / f"Figure_Riemann_Network_{band_name}_Surrogate.png"

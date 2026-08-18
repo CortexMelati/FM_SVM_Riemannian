@@ -108,6 +108,17 @@ def plot_svm_network_map(shap_values_fm, feature_names, target_band):
                 color, lw = '#228B22', 2.0 
                 
             ax.plot(x_coords, y_coords, color=color, linewidth=lw, zorder=0, alpha=0.9)
+            from matplotlib.lines import Line2D
+            legend_elements = [
+                Line2D([0], [0], color='#FF8C94', lw=5.0, label='Top 20% Impact'),
+                Line2D([0], [0], color='#8B4513', lw=3.5, label='Top 20-60% Impact'),
+                Line2D([0], [0], color='#228B22', lw=2.0, label='Bottom 40% Impact')
+            ]
+            ax.legend(handles=legend_elements, loc='lower left', title="SHAP Importance", fontsize=10)
+
+            ax.set_title(f"Connectivity features associated with fibromyalgia\n({target_band.upper()} Band - SHAP Importance)", fontsize=14, pad=20)
+            plt.tight_layout()
+            
         except KeyError:
             pass
 
@@ -120,10 +131,20 @@ def plot_svm_network_map(shap_values_fm, feature_names, target_band):
     plt.close()
 
 def plot_permutation_distribution(permuted_scores, actual_acc, pvalue, target_band):
-    print(f"  -> Generating Permutation Test Distribution Plot for {target_band.upper()} band...")
+    print(f"  -> Generating Permutation Test Distribution Plot (KDE) for {target_band.upper()} band...")
     
     plt.figure(figsize=(8, 6))
-    plt.hist(permuted_scores, bins=30, color='#93c59e', edgecolor='black', alpha=0.7, density=True, label='Permuted Scores (Null Distribution)')
+    
+    # Gebruik KDE (Kernel Density Estimation) in plaats van harde histogram bins
+    sns.kdeplot(
+        permuted_scores, 
+        fill=True, 
+        color='#93c59e', 
+        alpha=0.6, 
+        linewidth=2.5,
+        bw_adjust=1.5, # Maakt de curve net iets vloeiender bij discrete kleine datasets
+        label='Permuted Scores (Null Distribution)'
+    )
     
     # Lijn voor de daadwerkelijke model score
     plt.axvline(actual_acc, color='#d62728', linestyle='dashed', linewidth=2.5, 
@@ -133,10 +154,12 @@ def plot_permutation_distribution(permuted_scores, actual_acc, pvalue, target_ba
     plt.axvline(np.mean(permuted_scores), color='black', linestyle='dotted', linewidth=2, 
                 label=f'Chance Level (Mean: {np.mean(permuted_scores):.4f})')
 
-    plt.title(f"Permutation Test Distribution (1000 Iterations)\n({target_band.upper()} Band - p = {pvalue:.4f})", fontsize=12, pad=15)
-    plt.xlabel('Balanced Accuracy', fontsize=11)
-    plt.ylabel('Density', fontsize=11)
-    plt.legend(frameon=True, loc='upper right')
+    plt.title(f"Permutation Test Distribution (1000 Iterations)\n({target_band.upper()} Band - p = {pvalue:.4f})", fontsize=14, pad=15)
+    plt.xlabel('Balanced Accuracy', fontsize=12)
+    plt.ylabel('Density', fontsize=12)
+    
+    # Verplaats de legenda naar een mooie plek
+    plt.legend(frameon=True, loc='upper left', fontsize=10)
 
     ax = plt.gca()
     ax.spines['top'].set_visible(False)
@@ -198,6 +221,8 @@ def evaluate_all_svm_bands():
         final_svm = artifact['model']
         scaler = artifact['scaler']
         selected_features = artifact['features']
+        train_mean = artifact.get('training_accuracy', 0.0) 
+        train_std = artifact.get('training_std', 0.0)     
 
         print(f"-> Loaded frozen model trained on {len(selected_features)} features.")
 
@@ -277,6 +302,7 @@ def evaluate_all_svm_bands():
         final_results.append({
             'Band': band_name.upper(),
             'Optimal_Params': opt_params,
+            'CV_Training_Score': f"{train_mean:.3f} ± {train_std:.3f}",
             'Bal_Accuracy': f"{acc:.2%}",
             'Sensitivity': f"{rec:.2%}",
             'Precision': f"{prec:.2%}",

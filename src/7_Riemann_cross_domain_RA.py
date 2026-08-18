@@ -29,6 +29,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.metrics import accuracy_score, balanced_accuracy_score
 
 from pyriemann.utils.mean import mean_covariance
 from pyriemann.tangentspace import TangentSpace
@@ -78,7 +79,11 @@ class RiemannianAligner(BaseEstimator, TransformerMixin):
 def run_alignment_cross_domain():
     print("🚀 STARTING SCRIPT 7: RIEMANNIAN CROSS-DOMAIN VALIDATION (FRÉCHET ALIGNMENT)")
 
-    target_models = ["model_riemann_Theta_roi_TSSVM_Xdawn.pkl"] # Vul hier jouw winnende model(len) in
+    target_models = [
+        "model_riemann_theta_roi_TSSVM_xDAWN.pkl",
+        "model_riemann_beta_roi_TSSVM_xDAWN.pkl",
+        "model_riemann_gamma_roi_TSSVM_Coh.pkl"
+    ]
     
     for model_name in target_models:
         model_path = RIEMANN_DATA_DIR / model_name
@@ -95,9 +100,13 @@ def run_alignment_cross_domain():
         layout = artifact['layout']
         frozen_svm = full_pipeline.named_steps['svm'] 
         
-        # Extract steps up to the Covariance matrix calculation
-        cov_step_idx = [i for i, step in enumerate(full_pipeline.steps) if 'cov' in step[0] or 'xdawn' in step[0]][0]
-        cov_pipeline = Pipeline(full_pipeline.steps[:cov_step_idx+1])
+        # Extract steps up to the Covariance/Coherence matrix calculation
+        # This dynamic search ensures both Xdawn and Coherence architectures are supported
+        try:
+            cov_step_idx = [i for i, step in enumerate(full_pipeline.steps) if any(x in step[0] for x in ['cov', 'xdawn', 'coh', 'spd'])][-1]
+            cov_pipeline = Pipeline(full_pipeline.steps[:cov_step_idx+1])
+        except IndexError:
+            sys.exit(f"🚨 Fout: Kon de feature extraction stap niet vinden in pipeline voor {model_name}")
         
         y_source = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
         y_target = np.load(RIEMANN_DATA_DIR / f"target_y_{CROSS_TARGET_DATASET.lower()}.npy")
@@ -175,8 +184,8 @@ def run_alignment_cross_domain():
                 df_fold = pd.DataFrame({'Subject': groups_target[test_idx], 'True': y_tgt_te, 'Dir': pred_d, 'Align': pred_align})
                 df_sub = df_fold.groupby('Subject').agg(True_L=('True', 'first'), V_Dir=('Dir', lambda x: x.mode()[0]), V_Al=('Align', lambda x: x.mode()[0])).reset_index()
                 
-                direct_scores.append(accuracy_score(df_sub['True_L'], df_sub['V_Dir']))
-                alignment_scores.append(accuracy_score(df_sub['True_L'], df_sub['V_Al']))
+                direct_scores.append(balanced_accuracy_score(df_sub['True_L'], df_sub['V_Dir']))
+                alignment_scores.append(balanced_accuracy_score(df_sub['True_L'], df_sub['V_Al']))
                 
             tqdm.write(f"{n_splits:<10} | {np.mean(train_subs):<15.1f} | {np.mean(alignment_scores):<15.3f} | {np.mean(direct_scores):<15.3f}")
             results.append({'Total_Folds': n_splits, 'Avg_Train_Subjects': np.mean(train_subs), 'Riemannian_Alignment': np.mean(alignment_scores), 'Direct_Training': np.mean(direct_scores)})
@@ -198,7 +207,7 @@ def run_alignment_cross_domain():
             z_trans = np.polyfit(results_df['Avg_Train_Subjects'], results_df['Riemannian_Alignment'], 1)
             plt.plot(results_df['Avg_Train_Subjects'], np.poly1d(z_trans)(results_df['Avg_Train_Subjects']), color='gray', lw=2.5, alpha=0.8)
 
-            plt.title(f"Riemannian Domain Alignment on {CROSS_TARGET_DATASET} (Eq. 2)\nArchitecture: {arch_name}", fontsize=13, pad=15)
+            plt.title(f"Riemannian Domain Alignment on {CROSS_TARGET_DATASET} \nArchitecture: {arch_name}", fontsize=13, pad=15)
             plt.xlabel('Mean target training subjects', fontsize=12)
             plt.ylabel('Mean test accuracy', fontsize=12)
             

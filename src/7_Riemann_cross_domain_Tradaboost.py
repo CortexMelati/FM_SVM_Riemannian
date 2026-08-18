@@ -11,6 +11,8 @@ Overview:
     - If model is TSSVM_Xdawn: Loads Raw epochs and applies spatial filtering.
     
     Automatically generates comparative tables and figures for both architectures.
+    
+!!!! tkes 50 hrs to run on a CPU, consider using GPU acceleration or reducing folds for testing.
 
 Execution:
     python 7_Riemann_cross_domain_Tradaboost.py

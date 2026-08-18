@@ -35,6 +35,15 @@ from sklearn.model_selection import StratifiedGroupKFold, GridSearchCV
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.metrics import balanced_accuracy_score
 
+
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+
 # --- PyRiemann Compatibility ---
 try:
     from pyriemann.preprocessing import NearestSPD
@@ -190,7 +199,7 @@ def run_whole_brain_exploration():
             
         final_pipe.fit(X_final_input, y)
         best_name = f"model_riemann_{band_name}_whole_{best_arch}.pkl"
-        joblib.dump({'model': final_pipe, 'band': band_name, 'layout': 'whole', 'training_balanced_accuracy': best_row['CV_Balanced_Accuracy']}, SVM_DATA_DIR / best_name)
+        joblib.dump({'model': final_pipe, 'band': band_name, 'layout': 'whole', 'training_balanced_accuracy': best_row['CV_Balanced_Accuracy']}, RIEMANN_DATA_DIR / best_name)
 
     total_time = (time.time() - total_start_time) / 60
     print(f"\n✅ Script 2 Complete! Total Execution Time: {total_time:.2f} minutes.")

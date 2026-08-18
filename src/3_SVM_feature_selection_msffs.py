@@ -240,7 +240,7 @@ for k in range(1, len(metric_dict) + 1):
         'Current_Subset': ", ".join(metric_dict[k]['feature_names']),
         'Mean_Acc': round(mean_acc, 4),
         'Std_Dev': round(std_acc, 4),
-        '95_percent_CI': ci_str
+        'CV_Score_Formatted': f"{mean_acc:.3f} ± {std_acc:.3f}"  
     })
     
     # Data verzamelen voor de plot

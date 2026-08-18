@@ -66,7 +66,7 @@ def run_cv_ablation_study():
         scaler = StandardScaler()
         X_scaled = pd.DataFrame(scaler.fit_transform(X), columns=selected_features)
 
-        # --- 1. Single CV (Biased) ---
+        # --- 1. Single CV ---
         clf_single = GridSearchCV(
             estimator=base_svm, param_grid=param_grid, cv=cv_inner, 
             scoring='balanced_accuracy', n_jobs=-1
@@ -74,7 +74,7 @@ def run_cv_ablation_study():
         clf_single.fit(X_scaled, y, groups=groups)
         single_cv_score = clf_single.best_score_
         
-        # --- 2. Nested CV (Unbiased - Handmatige Outer Loop om 0-d array fout te voorkomen) ---
+        # --- 2. Nested CV ( Handmatige Outer Loop om 0-d array fout te voorkomen) ---
         nested_scores = []
         for train_idx, test_idx in cv_outer.split(X_scaled, y, groups=groups):
             X_tr, X_te = X_scaled.iloc[train_idx], X_scaled.iloc[test_idx]

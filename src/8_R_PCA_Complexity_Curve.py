@@ -8,6 +8,8 @@ Overview:
     number of Principal Components (mathematical features) extracted from the 
     Riemannian Tangent Space needed to reach peak performance.
     
+    not in use for thesis.
+    
 python 8_R_PCA_Complexity_Curve.py
 =============================================================================
 """

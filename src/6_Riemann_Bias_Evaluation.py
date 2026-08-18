@@ -173,7 +173,7 @@ def evaluate_riemann_bias():
 
     plt.tight_layout()
     RIEMANN_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    plot_path = RIEMANN_FIGURES_DIR / f"Figure_Riemann_Demographic_Bias_{band}_Xdawn.png"
+    plot_path = RIEMANN_FIGURES_DIR / f"Figure_Riemann_Demographic_Bias_{band}_xDAWN.png"
     plt.savefig(plot_path, dpi=300)
     plt.close()
     print(f"-> Visual fairness chart saved to: riemann_figures/{plot_path.name}\n")

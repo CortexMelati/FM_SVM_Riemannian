@@ -22,20 +22,38 @@ from pathlib import Path
 import sys
 import ast
 import mne
+import joblib
 
 from sklearn.base import BaseEstimator, TransformerMixin
-from pyriemann.estimation import Covariances, XdawnCovariances
+from pyriemann.estimation import Covariances, XdawnCovariances, Coherences
 from pyriemann.tangentspace import TangentSpace
 from sklearn.svm import SVC
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
                              roc_auc_score, confusion_matrix, brier_score_loss,
-                             average_precision_score)
+                             average_precision_score, balanced_accuracy_score)
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR, BANDS, BEST_CHANNELS_EVALUATE, CHANNELS_1020, RANDOM_STATE, CP_FM_DIR
+
+
+class AverageFrequencies(BaseEstimator, TransformerMixin):
+    def fit(self, X, y=None): return self
+    def transform(self, X): return np.mean(X, axis=-1) if X.ndim == 4 else X
+
+try:
+    from pyriemann.preprocessing import NearestSPD
+except ImportError:
+    try:
+        from pyriemann.estimation import NearestSPD
+    except ImportError:
+        from pyriemann.utils.base import nearest_sym_pos_def
+        class NearestSPD(BaseEstimator, TransformerMixin):
+            def fit(self, X, y=None): return self
+            def transform(self, X): return np.array([nearest_sym_pos_def(x) for x in X])
+
 
 # --- Custom Transformers ---
 class MNEBandPass(BaseEstimator, TransformerMixin):
@@ -66,6 +84,51 @@ def expected_calibration_error(y_true, y_prob, n_bins=10):
             ece += bin_weight * np.abs(bin_acc - bin_conf)
     return ece
 
+
+def plot_permutation_distribution(permuted_scores, actual_acc, pvalue, target_band):
+    print(f"  -> Generating Permutation Test Distribution Plot (KDE) for {target_band.upper()} band...")
+    
+    plt.figure(figsize=(8, 6))
+    
+    # Gebruik KDE (Kernel Density Estimation) in plaats van harde histogram bins
+    sns.kdeplot(
+        permuted_scores, 
+        fill=True, 
+        color='#93c59e', 
+        alpha=0.6, 
+        linewidth=2.5,
+        bw_adjust=1.5, # Maakt de curve net iets vloeiender
+        label='Permuted Scores (Null Distribution)'
+    )
+    
+    # Lijn voor de daadwerkelijke model score
+    plt.axvline(actual_acc, color='#d62728', linestyle='dashed', linewidth=2.5, 
+                label=f'Actual Model Score ({actual_acc:.4f})')
+    
+    # Lijn voor het gemiddelde toevalsniveau
+    plt.axvline(np.mean(permuted_scores), color='black', linestyle='dotted', linewidth=2, 
+                label=f'Chance Level (Mean: {np.mean(permuted_scores):.4f})')
+
+    plt.title(f"Permutation Test Distribution (1000 Iterations)\n({target_band.upper()} Band - p = {pvalue:.4f})", fontsize=14, pad=15)
+    plt.xlabel('Balanced Accuracy', fontsize=12)
+    plt.ylabel('Density', fontsize=12)
+    
+    # Verplaats de legenda naar een mooie plek
+    plt.legend(frameon=True, loc='upper left', fontsize=10)
+
+    ax = plt.gca()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    plt.tight_layout()
+    
+    RIEMANN_FIGURES_DIR.mkdir(parents=True, exist_ok=True) # Map is aangepast naar RIEMANN map
+    plot_path = RIEMANN_FIGURES_DIR / f"Figure_Permutation_Distribution_{target_band}.png"
+    plt.savefig(plot_path, dpi=300, facecolor='white', bbox_inches='tight')
+    plt.close()
+    print(f"  -> Permutation plot saved to riemann_figures/{plot_path.name}")
+
+
 def evaluate_riemann_testset():
     print("🚀 STARTING STEP 5: RIEMANNIAN EVALUATION ON UNSEEN TEST SET (SUBJECT-LEVEL)")
 
@@ -85,7 +148,7 @@ def evaluate_riemann_testset():
         sys.exit("🚨 Kolom 'Layout' ontbreekt in scoreboard! Voeg deze toe in Script 3 (met waarden 'ROI' of 'WHOLE').")
 
     ROI_INDICES = [CHANNELS_1020.index(ch) for ch in BEST_CHANNELS_EVALUATE]
-    valid_architectures = ['TSSVM_Cov', 'TSSVM_Xdawn'] # if different amend
+    valid_architectures = ['TSSVM_Cov', 'TSSVM_Xdawn', 'TSSVM_Coh'] # if different amend
 
     final_results = []
     
@@ -105,7 +168,7 @@ def evaluate_riemann_testset():
                 print(f"⚠️ Geen getrainde modellen gevonden voor {band_name.upper()} - {layout}. Skipping...")
                 continue
                 
-            best_row = band_scores.loc[band_scores['CV_Balanced_Accuracy'].idxmax()]
+            best_row = band_scores.loc[band_scores['CV_Balanced_Accuracy_Mean'].idxmax()]
             arch = best_row['Architecture']
             params = ast.literal_eval(best_row['Optimal_Params'])
             
@@ -123,6 +186,13 @@ def evaluate_riemann_testset():
                 steps.extend([('cov', Covariances(estimator='oas')), ('ts', TangentSpace(metric='riemann'))])
             elif arch == 'TSSVM_Xdawn':
                 steps.extend([('xdawn', XdawnCovariances(nfilter=6, estimator='oas')), ('ts', TangentSpace(metric='riemann'))])
+            elif arch == 'TSSVM_Coh':
+                steps.extend([
+                    ('coh', Coherences(coh='lagged')), 
+                    ('avg_freq', AverageFrequencies()), 
+                    ('spd', NearestSPD()), 
+                    ('ts', TangentSpace(metric='riemann'))
+                ])
                 
             steps.extend([
                 ('scaler', StandardScaler()),
@@ -164,23 +234,69 @@ def evaluate_riemann_testset():
             auprc = average_precision_score(y_test_sub, y_prob_sub) 
             brier = brier_score_loss(y_test_sub, y_prob_sub)
             ece = expected_calibration_error(y_test_sub, y_prob_sub)
+            
+            cm = confusion_matrix(y_test_sub, y_pred_sub)
+            
+            if cm.shape == (2, 2):
+                tn, fp, fn, tp = cm.ravel()
+                # Bescherm tegen delen door nul
+                fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+                fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
+            else:
+                print(f"⚠️ Waarschuwing: Confusion matrix heeft onverwachte vorm voor {band_name}-{layout}: {cm.shape}")
+                fpr, fnr = 0.0, 0.0
+
+            # --- PERMUTATION TEST ---
+            from sklearn.utils import shuffle
+            n_permutations = 1000
+            permuted_scores = []
+            for i in range(n_permutations):
+                y_test_shuffled = shuffle(y_test_sub, random_state=RANDOM_STATE + i)
+                score = balanced_accuracy_score(y_test_shuffled, y_pred_sub)
+                permuted_scores.append(score)
+
+            pvalue = (np.sum(np.array(permuted_scores) >= acc) + 1) / (n_permutations + 1)
+            print(f"-> Permutation P-value: {pvalue:.4f}")
+
+            # Roep de KDE plot functie aan (zorg dat je die functie ook bovenin Script 5 definieert, net als bij SVM)
+            plot_permutation_distribution(permuted_scores, acc, pvalue, band_name)
+            
+            # Reconstruct the filename exactly as saved in Script 3
+            layout_str = 'whole' if layout == 'WHOLE' else 'roi'
+            model_filename = f"model_riemann_{band_name.lower()}_{layout_str}_{arch}.pkl"
+            model_path = RIEMANN_DATA_DIR / model_filename
+            
+            try:
+                artifact = joblib.load(model_path)
+            except FileNotFoundError:
+                print(f"⚠️ Waarschuwing: {model_filename} niet gevonden. CV scores worden op 0.0 gezet.")
+                artifact = {}
+            
+            
+            
+            train_mean = artifact.get('training_balanced_accuracy', 0.0)
+            train_std = artifact.get('training_std', 0.0)
 
             final_results.append({
                 'Band': band_name.upper(),
-                'Layout': layout, # Layout toegevoegd aan output tabel!
+                'Layout': layout, 
                 'Optimal_Architecture': arch,
                 'Optimal_Params': f"C={params['C']}, {params['kernel']}",
+                'CV_Training_Score': f"{train_mean:.3f} ± {train_std:.3f}",
                 'Bal_Accuracy': f"{acc:.2%}",
                 'Sensitivity': f"{rec:.2%}",
                 'Precision': f"{prec:.2%}",
+                'FPR': f"{fpr:.2%}", 
+                'FNR': f"{fnr:.2%}", 
                 'AUPRC': f"{auprc:.4f}",
                 'AUROC': f"{auc:.4f}",
                 'Brier': f"{brier:.4f}",
-                'ECE': f"{ece:.4f}"
+                'ECE': f"{ece:.4f}",
+                'Permutation_P': f"{pvalue:.4f}"
             })
-
+            
+            
             # --- GENERATE PLOTS ---
-            cm = confusion_matrix(y_test_sub, y_pred_sub)
             plt.figure(figsize=(6, 5))
             sns.heatmap(cm, annot=True, fmt='d', cmap='Oranges',
                         xticklabels=['Healthy (0)', 'Fibro (1)'], 
