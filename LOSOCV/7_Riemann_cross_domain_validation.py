@@ -6,6 +6,10 @@ Overview:
     Replicates Section 2.7 and 3.4 for the Riemannian model.
     Instead of TrAdaBoost, this script explicitly uses Riemannian Alignment 
     (Fréchet mean re-centering) as described in Equation 2 of the thesis.
+    
+    METHODOLOGICAL UPDATE: Aligned with the Master Cohort (LOSOCV) 
+    preprocessing. The Source Domain alignment is now computed across the 
+    entire primary dataset before testing on the Target Domain (NCCP).
 
 Execution:
     python 7_Riemann_cross_domain_RA.py
@@ -55,6 +59,34 @@ class ROIExtractor(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None): return self
     def transform(self, X): return X[:, self.indices, :]
 
+class AverageFrequencies(BaseEstimator, TransformerMixin):
+    def __init__(self): 
+        pass
+    def fit(self, X, y=None): 
+        return self
+    def transform(self, X):
+        # We assume X has shape (n_epochs, n_channels, n_channels, n_freqs)
+        # Average over the last axis (frequencies)
+        return np.mean(X, axis=-1)
+
+class NearestSPD(BaseEstimator, TransformerMixin):
+    def __init__(self, reg=1e-6): 
+        self.reg = reg
+        
+    def fit(self, X, y=None): 
+        return self
+        
+    def transform(self, X):
+        # Maakt de matrix perfect symmetrisch en positief definiet (SPD)
+        X_sym = (X + np.transpose(X, (0, 2, 1))) / 2.0
+        eyes = np.tile(np.eye(X.shape[1]), (X.shape[0], 1, 1))
+        
+        # PATCH VOOR OUDE PICKLE BESTANDEN:
+        # Als 'self.reg' niet bestaat (omdat het een oud model is), gebruik dan 1e-6
+        reg_value = getattr(self, 'reg', 1e-6)
+        
+        return X_sym + reg_value * eyes
+
 # THE MAGIC: Implementing Equation 2 from the thesis
 class RiemannianAligner(BaseEstimator, TransformerMixin):
     def __init__(self):
@@ -74,15 +106,16 @@ class RiemannianAligner(BaseEstimator, TransformerMixin):
             X_aligned[i] = self.invsqrt_mean_ @ X[i] @ self.invsqrt_mean_
         return X_aligned
 
+
+
 # =========================================================================
 
 def run_alignment_cross_domain():
     print("🚀 STARTING SCRIPT 7: RIEMANNIAN CROSS-DOMAIN VALIDATION (FRÉCHET ALIGNMENT)")
-
+    
     target_models = [
-        "model_riemann_theta_roi_TSSVM_xDAWN.pkl",
-        "model_riemann_beta_roi_TSSVM_xDAWN.pkl",
-        "model_riemann_gamma_roi_TSSVM_Coh.pkl"
+        "model_riemann_beta_roi_TSSVM_Cov.pkl",
+        "model_riemann_delta_roi_TSSVM_Coh.pkl"
     ]
     
     for model_name in target_models:
@@ -100,35 +133,36 @@ def run_alignment_cross_domain():
         layout = artifact['layout']
         frozen_svm = full_pipeline.named_steps['svm'] 
         
-        # Extract steps up to the Covariance/Coherence matrix calculation
-        # This dynamic search ensures both Xdawn and Coherence architectures are supported
-        try:
-            cov_step_idx = [i for i, step in enumerate(full_pipeline.steps) if any(x in step[0] for x in ['cov', 'xdawn', 'coh', 'spd'])][-1]
-            cov_pipeline = Pipeline(full_pipeline.steps[:cov_step_idx+1])
-        except IndexError:
-            sys.exit(f"🚨 Fout: Kon de feature extraction stap niet vinden in pipeline voor {model_name}")
-        
-        y_source = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
+        # AANGEPAST NAAR MASTER DATASET
+        y_source = np.load(RIEMANN_DATA_DIR / "y_master_riemann.npy")
         y_target = np.load(RIEMANN_DATA_DIR / f"target_y_{CROSS_TARGET_DATASET.lower()}.npy")
         groups_target = np.load(RIEMANN_DATA_DIR / f"target_groups_{CROSS_TARGET_DATASET.lower()}.npy")
 
         if 'Cov' in arch_name:
-            X_source_raw = np.load(RIEMANN_DATA_DIR / f"covs_train_{band.lower()}_{layout.lower()}.npy")
+            # Voor TSSVM_Cov zijn de opgeslagen bestanden AL covariantiematrices.
+            # We hebben dus geen extra feature extraction pipeline nodig.
+            X_source_raw = np.load(RIEMANN_DATA_DIR / f"covs_master_{band.lower()}_{layout.lower()}.npy")
             X_target_raw = np.load(RIEMANN_DATA_DIR / f"target_covs_{CROSS_TARGET_DATASET.lower()}_{band.capitalize()}_{layout.lower()}.npy")
-            # For TSSVM_Cov, the preloaded data ARE the covariances. No cov_pipeline needed.
             C_source = X_source_raw
             C_target = X_target_raw
         else:
-            X_source_raw = np.load(RIEMANN_DATA_DIR / "X_train_raw.npy")
+            # Voor andere modellen (zoals xDAWN of Coh) moeten we de ruwe signalen nog transformeren.
+            try:
+                cov_step_idx = [i for i, step in enumerate(full_pipeline.steps) if any(x in step[0] for x in ['cov', 'xdawn', 'coh', 'spd'])][-1]
+                cov_pipeline = Pipeline(full_pipeline.steps[:cov_step_idx+1])
+            except IndexError:
+                sys.exit(f"🚨 Fout: Kon de feature extraction stap niet vinden in pipeline voor {model_name}")
+                
+            X_source_raw = np.load(RIEMANN_DATA_DIR / "X_master_raw.npy")
             X_target_raw = np.load(RIEMANN_DATA_DIR / f"target_X_{CROSS_TARGET_DATASET.lower()}_raw.npy")
             print("-> Extracting Covariance matrices...")
             C_source = cov_pipeline.transform(X_source_raw)
             C_target = cov_pipeline.transform(X_target_raw)
 
         # ---------------------------------------------------------
-        # SOURCE ALIGNMENT & TRAINING (Done once)
+        # SOURCE ALIGNMENT & TRAINING (Done once on Master Cohort)
         # ---------------------------------------------------------
-        print("-> Aligning Source Domain using its Fréchet Mean...")
+        print("-> Aligning Master Source Domain using its Fréchet Mean...")
         source_aligner = RiemannianAligner()
         C_source_aligned = source_aligner.fit_transform(C_source)
         
@@ -171,7 +205,7 @@ def run_alignment_cross_domain():
                 # --- Method 2: RIEMANNIAN ALIGNMENT (Equation 2) ---
                 target_aligner = RiemannianAligner()
                 # Find Fréchet mean of TARGET TRAINING data, use it to align both Train & Test
-                # C_tgt_tr_aligned = target_aligner.fit_transform(C_tgt_tr)
+                C_tgt_tr_aligned = target_aligner.fit_transform(C_tgt_tr)
                 C_tgt_te_aligned = target_aligner.transform(C_tgt_te)
                 
                 # Project to Tangent space
