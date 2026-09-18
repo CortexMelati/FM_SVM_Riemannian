@@ -17,39 +17,68 @@ To maintain high academic standards and prevent data leakage, the pipeline is co
 
 ---
 
+## Execution Order & Pipeline Structure
+To ensure full reproducibility and prevent data leakage, the repository is strictly modular. The pipeline requires specific manual interventions where hyperparameters and target bands must be updated based on intermediate results.
+
+### CRITICAL WORKFLOW: When to update settings
+
+1. **Initial Setup:** Before running anything, configure your dataset paths, sample rates (`SFREQ_MAP`), and standard 10-20 channels in `config.py`.
+2. **First Run (Exploration):** Run Phase 1, followed by `1_SVM_feature_ranking.py` and `2_riemann_whole_brain.py`. These scripts evaluate the *entire* spatial and spectral space to find the optimal frequency bands.
+3. **Manual Intervention (Update Config):** Stop the pipeline. Review the outputs of the exploratory scripts and update `config.py`:
+   * Set `FOCUS_BAND = 'your_best_band'` (e.g., `'gamma'`) for the downstream SVM pipeline.
+   * Set `BEST_BANDS = ['band_1', 'band_2']` (e.g., `['Theta', 'Gamma']`) for the downstream Riemannian ablation and SVM Fusion scripts.
+4. **Resume Pipeline:** Run the remaining scripts in Phase 2, 3, and 4. 
+*(Note: Some Riemannian scripts, like `3_riemann_roi_ablation.py`, contain an internal boolean toggle `RUN_AS_WHOLE_BRAIN = False/True` that must be set manually depending on the desired spatial layout).*
+
 ## Pipeline Architecture
 
-### Phase 0: Configuration (`config.py`)
+### Phase 0: Central Configuration
+* **`config.py`**
+  The central nervous system of the repository. Manages global variables, channel selections, label mappings, and the dynamic `FOCUS_BAND` / `BEST_BANDS` routing.
 
-All global variables, random states, channel selections (10-20 system), and the central ablation switch (`USE_ROI: True/False`) are managed here to guarantee architectural synchronization across all scripts.
+### Phase 1: Preprocessing & Data Aggregation
+* **`preprocess_pipeline.py`:** Filters raw `.vhdr` EEG data, epochs into 1-second segments, and extracts spectral coherence. Generates QC plots via **`prep_plot.py`**.
+* **`build_dataset.py`:** Aggregates features and strictly enforces an 80/20 subject-level Train/Test split.
 
-### Phase 1: Feature-Based Baseline Pipeline (SVM)
+### Phase 2: Feature-Based Baseline Pipeline (SVM)
+* **`1_SVM_feature_ranking.py`:** Evaluates the full feature space to calculate global SHAP values and identify the optimal `FOCUS_BAND`.
+* **`2_SVM_roi_feature_screening.py`:** Restricts data to the central 9-channel ROI and identifies the Top 10 candidate connectivity features.
+* **`3_SVM_feature_selection_msffs.py`:** Runs the mSFFS algorithm to find the optimal minimal feature subset.
+* **`4_SVM_final_model_training.py`:** Trains and tunes the final SVM on the selected subset. Freezes the model as a `.pkl` artifact.
+* **`5_SVM_model_evaluation.py`:** Evaluates the frozen model on the unseen test set, generating clinical metrics, final SHAP plots, and t-SNE distributions.
 
-* **Data Preprocessing & Feature Extraction (`preprocess_pipeline.py`):** Applies a 50 Hz notch filter and 0.5–44 Hz bandpass filter. Discards the first 10s of data. Divides data into 30s macro-segments and 1s micro-epochs. Extracts 855 Spectral Coherence features across 5 frequency bands using the multitaper method.
-* **Dataset Aggregation & Balancing (`build_dataset.py`):** Aggregates features and implements a strict 80/20 train/test split grouped by `Subject` to prevent data leakage. Dynamically balances the training set via data-density calculation and locks exactly 5 segments per subject for the hold-out test set.
-* **1. Global Feature Ranking (`1_SVM_global_feature_ranking.py`):** Evaluates the complete feature space (855 features across all channels and bands) using a rapid baseline SVM to calculate global SHAP values. Outputs **Figure 1** (horizontal SHAP bars of the top 15 features), mathematically justifying the selection of the most predictive frequency band and the central channels.
-* **2. ROI Feature Screening (`2_SVM_roi_feature_screening.py`):** Isolates the dataset to the optimal frequency band and the 9 central ROI channels (36 possible functional connections). Conducts a localized SHAP analysis to identify the top 10 connectivity features. Outputs an initial network topography map visualizing these 10 candidate connections.
-* **3. Feature Selection (`3_SVM_feature_selection_msffs.py`):** Applies the mSFFS algorithm on the screened ROI data to incrementally build feature subsets (1 to 20 features), evaluating them via StratifiedGroupKFold cross-validation. Generates **Figure 3** (mSFFS curve) to determine the exact inflection point where classification accuracy plateaus, effectively identifying the optimal feature subset size (e.g., the top 5 features).
-* **4. Final Model Training (`4_SVM_final_model_training.py`):** Restricts the training data strictly to the optimal feature subset identified by mSFFS. Executes a GridSearchCV to tune the RBF kernel hyperparameters (**$C$** and **$\gamma$**). Validates statistical significance using a 1,000-shuffle permutation test. Freezes and exports the final model and scaler as a `.pkl` artifact. Outputs  **Figure 4** , the definitive topographical brain map displaying the selected biomarkers scaled by importance.
-* **5. Model Evaluation & Interpretability (`5_SVM_model_evaluation_and_shap.py`):** Evaluates the frozen model exclusively on the unseen 20% hold-out test set. Calculates definitive clinical metrics (Accuracy, Recall, Brier Score, and Expected Calibration Error). Computes final SHAP values for the selected features. Outputs the Confusion Matrix, **Figure 5** (t-SNE/PCA separation plot), and **Figures 6A & 6B** (SHAP bar and beeswarm plots).
+### Phase 3: Geometry-Based Riemannian Pipeline
+* **`1_preprocess_riemann.py`:** Generates Spatial Covariance matrices strictly respecting the Phase 1 train/test split.
+* **`2_riemann_whole_brain.py`:** Exploratory analysis testing all architectures on the 19-channel layout to identify the `BEST_BANDS`.
+* **`3_riemann_roi_ablation_singlecv_rep10.py`:** Evaluates the identified top bands using the central ROI and freezes the winning geometric models.
+* **`4_plot_riemann_results.py`:** Trains linear surrogate models to extract and plot paper-ready Riemannian network topographies.
+* **`5_Riemann_Model_Evaluation.py`:** Evaluates the frozen models on the test set using Subject-Level Majority Voting.
 
-### Phase 2: Geometry-Based Riemannian Pipeline
-
-* **1. Riemann Preprocessing (`1_preprocess_riemann.py`):** Filters the raw EEG data and strictly applies the Eyes-Closed (EC) filter. Generates the spatial covariance matrices required for geometric mapping.
-* **2. Riemannian Model Training (`2_SVM_Riemannian_Model_Training.py`):** Trains and optimizes the geometric classifiers via GridSearchCV. Evaluates baseline MDM against the Tangent Space SVM (TS-SVM), selects the best-performing architecture, and freezes the model (`.pkl`).
-* **3. Biomarker Mapping (`3_Riemannian_Biomarker_Map.py`):** If TS-SVM is selected, mathematically extracts the tangent space weights and projects them onto a paper-ready 19-channel topographical head map.
-* **4. Riemannian Evaluation (`4_Riemannian_Model_Evaluation.py`):** Evaluates the frozen geometric model on the unseen test set. Generates a comprehensive `.txt` report containing Accuracy, Brier Score, ECE, Precision, and Recall, alongside the Confusion Matrix.
-* **5. Riemannian Data Distribution (`5_Riemannian_Data_Distribution.py`):** Visualizes the class separability by plotting a t-SNE distribution based specifically on the Riemannian Tangent Space data structure.
-* **6. Training Logbook (`6_Riemannian_Training_Logbook.py`):** Automatically generates and logs the hyperparameter tuning process for the geometric pipelines.
-* **7. Female Sensitivity Analysis (`7_Riemannian_Female_Sensitivity.py`):** Executes a female-only confounding check on the Riemannian data to verify robustness against demographic variance.
-
-### Phase 3: Clinical Fairness & Generalizability
-
-* **Algorithmic Bias Evaluation (`evaluate_bias.py`):** Merges blind test-set predictions from both the SVM and Riemannian models with metadata (`participants.tsv`) to evaluate hardware-specific and demographic fairness (e.g., accuracy across Sex and Age groups).
-* **Cross-Domain Validation (`cross_domain_validation.py`):** Tests hardware-independence by evaluating frozen models on isolated target cohorts. Subsequently applies **TrAdaBoost** (Instance-Weighted Domain Adaptation) to calibrate models against hardware-specific distribution shifts. *(Replicates Paper Figure 7).*
+### Phase 4: Fairness & Cross-Domain Generalizability
+* **`6_Riemann_Bias_Evaluation.py` & `7_SVM_female_sensitivity_analysis.py`:** Evaluates model robustness against demographic confounders.
+* **`7_Riemann_cross_domain_Tradaboost.py` & `8_SVM_cross_domain_validation.py`:** Performs Transfer Learning (TrAdaBoost / Riemannian Alignment) on external cohorts (e.g., NCCP).
+* **`9_SVM_cross_frequency_fusion_msffs.py`:** Tests for complementarity between the two `BEST_BANDS` using a combined mSFFS search space.
 
 ## Methodological Safeguards
 
 * **Zero Data Leakage:** The `StandardScaler` (SVM) and Fréchet Mean reference states (Riemann) are fitted solely on the training data. The 20% hold-out sets are transformed exclusively using these frozen parameters.
 * **Blind Demographics:** Demographic data (Age, Sex) are strictly excluded from the training feature space to prevent the algorithms from establishing non-physiological diagnostic shortcuts. Bias is evaluated strictly post-hoc.
-* **Artifact Prevention:** By epoching the data prior to concatenation, the pipeline actively prevents phase-discontinuity artifacts that could otherwise lead to severe overfitting in lower frequency bands.
+
+## 🧪 Alternative: LOSOCV Evaluation Pipeline (Folder: `/LOSOCV`)
+
+To overcome the statistical limitations of small clinical hold-out sets and prevent optimization leakage, this repository includes an alternative pipeline utilizing **Leave-One-Subject-Out Cross-Validation (LOSOCV)**. This pipeline replaces the standard 80/20 Train/Test split evaluation.
+
+> **⚠️ CRITICAL WARNING: DESTRUCTIVE OVERWRITE**
+> Executing the scripts within the `LOSOCV/` directory **will overwrite** the intermediate feature files (e.g., `top_10_roi_features.csv`), scoreboards, and frozen `.pkl` model artifacts generated by the main pipeline. 
+> 
+> *Only run these scripts if you have backed up/moved the results from the main baseline pipeline, or if you explicitly intend to overwrite them to establish the LOSOCV models as your definitive evaluation standard.*
+
+### LOSOCV Execution Order
+
+If you choose to run the LOSOCV validation, execute the scripts in the `LOSOCV/` folder in the following order:
+
+1. **`build_dataset.py`:** Generates a unified `final_dataset_master.csv` (bypassing the traditional train/test split) while isolating the target domain.
+2. **`1_SVM_feature_ranking.py` & `2_SVM_roi_feature_screening.py`:** Performs exploratory SHAP ranking on the full master dataset to define the feature space.
+3. **`3_SVM_feature_selection_msffs.py`:** Runs the mSFFS algorithm evaluated strictly via LOSOCV to find the optimal minimal feature subset.
+4. **`4_SVM_final_model_training.py`:** The core LOSOCV evaluation engine. Computes final clinical metrics (AUROC, Brier, ECE, Permutation P-values) using strict subject isolation.
+5. **Riemannian Scripts (`1_...` to `7_...`):** The geometric pipeline is similarly adapted to evaluate spatial covariance matrices utilizing Fréchet mean alignment and LOSOCV across the master cohort.
