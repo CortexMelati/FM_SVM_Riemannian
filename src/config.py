@@ -51,6 +51,8 @@ RIEMANN_FIGURES_DIR = FIGURES_DIR / "riemann_figures"
 SVM_DATA_DIR = PROCESSED_DATA_DIR / "svm_data"
 SVM_FIGURES_DIR = FIGURES_DIR / "svm_figures"
 
+# Nieuwe centrale map voor alle .pkl en .npy model- en databestanden
+SAVED_MODELS_DIR = PROCESSED_DATA_DIR / "saved_models"
 
 # Ensure output directories exist
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -60,6 +62,7 @@ RIEMANN_DATA_DIR.mkdir(parents=True, exist_ok=True)
 RIEMANN_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 SVM_DATA_DIR.mkdir(parents=True, exist_ok=True)
 SVM_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+SAVED_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ==============================================================================
@@ -67,7 +70,7 @@ SVM_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 # ==============================================================================
 # The primary frequency band used for SHAP, Bias Evaluation, and Cross Validation
 FOCUS_BAND = 'gamma' # change to the best band from 1_SVM_feature_ranking  **Gamma or Beta
-BEST_BANDS = ['Theta', 'Gamma'] #whole brain = theta and gamma, ROI = Theta and alpha
+BEST_BANDS = ['Beta', 'Gamma'] #whole brain = theta and gamma, ROI = Theta and Gamma
 
 
 # Internal Cross-Domain Validation cohorts (matched with participants.tsv 'study' column)

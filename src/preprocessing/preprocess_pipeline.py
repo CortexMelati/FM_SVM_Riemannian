@@ -48,20 +48,21 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 
 from config import (
-    RESULTS_DIR, 
+    RESULTS_DIR,
+    SAVED_MODELS_DIR,
     CP_FM_DIR,
-    FM_DIR,            
-    TDBRAIN_DIR,          
-    CHRONIC_PAIN_DIR,     
-    CHANNELS_1020, 
-    BANDS, 
-    SFREQ_MAP, 
+    FM_DIR,       
+    TDBRAIN_DIR,
+    CHRONIC_PAIN_DIR,
+    CHANNELS_1020,
+    BANDS,
+    SFREQ_MAP,
     EPOCH_LENGTH,
     FILTER_HP,
     FILTER_LP,
     NOTCH_FREQ,
     CHANNEL_RENAMING_MAP,
-    LABEL_MAPPING         
+    LABEL_MAPPING
 )
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -291,7 +292,7 @@ def process_subject(file_path, output_dir, dataset_name):
             n_segments_used += 1
             all_epochs_data.append(epochs.get_data(copy=True))
             
-            # Feature extraction for THIS specific 30s segment
+            # Feature extraction for this specific 30s segment
             df_seg = extract_connectivity_features(epochs, subject_id, condition, seg_idx + 1)
             all_features.append(df_seg)
             
@@ -320,7 +321,7 @@ def process_subject(file_path, output_dir, dataset_name):
             plt.close('all')
 
         # 8. CLEAN DATA SAVE
-        np.save(os.path.join(save_dir, f"{subject_id}_{condition}_cleaned.npy"), combined_data)
+        np.save(SAVED_MODELS_DIR / f"{subject_id}_{condition}_cleaned.npy", combined_data)
 
         # 9. LOGGING
         num_features = df_features.shape[1] - 3 # Exclude Subject, Condition & Segment cols

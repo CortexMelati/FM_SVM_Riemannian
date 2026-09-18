@@ -29,7 +29,7 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import (PROJECT_ROOT, RESULTS_DIR, PROCESSED_DATA_DIR, SFREQ_MAP, 
                     ACTIVE_DATASET_NAME, BANDS, CHANNELS_1020, BEST_CHANNELS_EVALUATE, 
-                    RIEMANN_DATA_DIR, CROSS_TARGET_DATASET)
+                    RIEMANN_DATA_DIR, CROSS_TARGET_DATASET, SAVED_MODELS_DIR)
 
 CONDITION = 'EC'  # or EO
 SFREQ = SFREQ_MAP.get(ACTIVE_DATASET_NAME, 500)
@@ -49,13 +49,13 @@ def apply_bandpass_filter(epochs_data, l_freq, h_freq, sfreq=500):
     ) 
 
 def process_source_domain():
-    print("🚀 STARTING PART A: SOURCE DOMAIN PREPROCESSING (TRAIN/TEST SPLIT)")
+    print("STARTING PART A: SOURCE DOMAIN PREPROCESSING (TRAIN/TEST SPLIT)")
     
     train_csv = PROCESSED_DATA_DIR / "final_dataset_train.csv"
     test_csv = PROCESSED_DATA_DIR / "final_dataset_test.csv"
     
     if not train_csv.exists() or not test_csv.exists():
-        raise FileNotFoundError("🚨 SVM CSV files missing. Run build_dataset.py first.")
+        raise FileNotFoundError("SVM CSV files missing. Run build_dataset.py first.")
         
     df_train = pd.read_csv(train_csv)
     df_test = pd.read_csv(test_csv)
@@ -65,7 +65,7 @@ def process_source_domain():
     
     overlap = set(train_subjects).intersection(set(test_subjects))
     if overlap:
-        raise ValueError(f"🚨 CRITICAL ERROR: Data leakage detected. Subjects in both sets: {overlap}")
+        raise ValueError(f"CRITICAL ERROR: Data leakage detected. Subjects in both sets: {overlap}")
 
     file_pattern = f"*_{CONDITION}_cleaned.npy"
     subject_files = list(RESULTS_DIR.rglob(file_pattern))
@@ -101,36 +101,36 @@ def process_source_domain():
     y_test = np.array(y_test_list)
     groups_test = np.array(group_test_list)
 
-    print(f"  📊 Train Tensor: {X_train.shape} | Test Tensor: {X_test.shape}")
+    print(f"  Train Tensor: {X_train.shape} | Test Tensor: {X_test.shape}")
 
     # Save base labels and RAW DATA
-    np.save(RIEMANN_DATA_DIR / "X_train_raw.npy", X_train)
-    np.save(RIEMANN_DATA_DIR / "X_test_raw.npy", X_test)  
-    np.save(RIEMANN_DATA_DIR / "y_train_riemann.npy", y_train)
-    np.save(RIEMANN_DATA_DIR / "groups_train_riemann.npy", groups_train)
-    np.save(RIEMANN_DATA_DIR / "y_test_riemann.npy", y_test)
-    np.save(RIEMANN_DATA_DIR / "groups_test_riemann.npy", groups_test)
+    np.save(SAVED_MODELS_DIR / "X_train_raw.npy", X_train)
+    np.save(SAVED_MODELS_DIR / "X_test_raw.npy", X_test)  
+    np.save(SAVED_MODELS_DIR / "y_train_riemann.npy", y_train)
+    np.save(SAVED_MODELS_DIR / "groups_train_riemann.npy", groups_train)
+    np.save(SAVED_MODELS_DIR / "y_test_riemann.npy", y_test)
+    np.save(SAVED_MODELS_DIR / "groups_test_riemann.npy", groups_test)
 
     for band_name, (l_freq, h_freq) in BANDS.items():
-        print(f"  ⏳ Processing band: {band_name.upper()}...")
+        print(f" Processing band: {band_name.upper()}...")
         X_tr_filt = apply_bandpass_filter(X_train, l_freq, h_freq, SFREQ)
         X_te_filt = apply_bandpass_filter(X_test, l_freq, h_freq, SFREQ)
         
         # Whole Brain
-        np.save(RIEMANN_DATA_DIR / f"covs_train_{band_name}_whole.npy", Covariances(estimator='oas').transform(X_tr_filt))
-        np.save(RIEMANN_DATA_DIR / f"covs_test_{band_name}_whole.npy", Covariances(estimator='oas').transform(X_te_filt))
+        np.save(SAVED_MODELS_DIR / f"covs_train_{band_name}_whole.npy", Covariances(estimator='oas').transform(X_tr_filt))
+        np.save(SAVED_MODELS_DIR / f"covs_test_{band_name}_whole.npy", Covariances(estimator='oas').transform(X_te_filt))
         # ROI
-        np.save(RIEMANN_DATA_DIR / f"covs_train_{band_name}_roi.npy", Covariances(estimator='oas').transform(X_tr_filt[:, ROI_INDICES, :]))
-        np.save(RIEMANN_DATA_DIR / f"covs_test_{band_name}_roi.npy", Covariances(estimator='oas').transform(X_te_filt[:, ROI_INDICES, :]))
+        np.save(SAVED_MODELS_DIR / f"covs_train_{band_name}_roi.npy", Covariances(estimator='oas').transform(X_tr_filt[:, ROI_INDICES, :]))
+        np.save(SAVED_MODELS_DIR / f"covs_test_{band_name}_roi.npy", Covariances(estimator='oas').transform(X_te_filt[:, ROI_INDICES, :]))
 
-    print("✅ Source Preprocessing Complete.\n")
+    print("Source Preprocessing Complete.\n")
 
 def process_target_domain():
-    print(f"🚀 STARTING PART B: TARGET DOMAIN PREPROCESSING ({CROSS_TARGET_DATASET})")
+    print(f"STARTING PART B: TARGET DOMAIN PREPROCESSING ({CROSS_TARGET_DATASET})")
     
     target_csv_path = PROCESSED_DATA_DIR / f"target_domain_{CROSS_TARGET_DATASET.lower()}.csv"
     if not target_csv_path.exists():
-        print(f"⚠️ Target CSV niet gevonden. Cross-Domain data wordt overgeslagen.")
+        print(f"Target CSV niet gevonden. Cross-Domain data wordt overgeslagen.")
         return
 
     df_target = pd.read_csv(target_csv_path)
@@ -160,26 +160,26 @@ def process_target_domain():
             pass
 
     if not X_target_list:
-        print("🚨 FOUT: Geen target data succesvol ingeladen.")
+        print("FOUT: Geen target data succesvol ingeladen.")
         return
 
     X_target = np.concatenate(X_target_list)
-    np.save(RIEMANN_DATA_DIR / f"target_y_{CROSS_TARGET_DATASET.lower()}.npy", np.array(y_target_list))
-    np.save(RIEMANN_DATA_DIR / f"target_groups_{CROSS_TARGET_DATASET.lower()}.npy", np.array(group_target_list))
-    np.save(RIEMANN_DATA_DIR / f"target_X_{CROSS_TARGET_DATASET.lower()}_raw.npy", X_target)
+    np.save(SAVED_MODELS_DIR / f"target_y_{CROSS_TARGET_DATASET.lower()}.npy", np.array(y_target_list))
+    np.save(SAVED_MODELS_DIR / f"target_groups_{CROSS_TARGET_DATASET.lower()}.npy", np.array(group_target_list))
+    np.save(SAVED_MODELS_DIR / f"target_X_{CROSS_TARGET_DATASET.lower()}_raw.npy", X_target)
     
-    print(f"  📊 Target Tensor: {X_target.shape}")
+    print(f"  Target Tensor: {X_target.shape}")
 
     for band_name, (l_freq, h_freq) in BANDS.items():
-        print(f"  ⏳ Processing target band: {band_name.upper()}...")
+        print(f"  Processing target band: {band_name.upper()}...")
         X_filt = apply_bandpass_filter(X_target, l_freq, h_freq, TARGET_SFREQ)
         
-        np.save(RIEMANN_DATA_DIR / f"target_covs_{CROSS_TARGET_DATASET.lower()}_{band_name}_whole.npy", Covariances(estimator='oas').transform(X_filt))
-        np.save(RIEMANN_DATA_DIR / f"target_covs_{CROSS_TARGET_DATASET.lower()}_{band_name}_roi.npy", Covariances(estimator='oas').transform(X_filt[:, ROI_INDICES, :]))
+        np.save(SAVED_MODELS_DIR / f"target_covs_{CROSS_TARGET_DATASET.lower()}_{band_name}_whole.npy", Covariances(estimator='oas').transform(X_filt))
+        np.save(SAVED_MODELS_DIR / f"target_covs_{CROSS_TARGET_DATASET.lower()}_{band_name}_roi.npy", Covariances(estimator='oas').transform(X_filt[:, ROI_INDICES, :]))
 
-    print("✅ Target Preprocessing Complete.")
-
+    print("Target Preprocessing Complete.")
+    
 if __name__ == "__main__":
-    RIEMANN_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    SAVED_MODELS_DIR.mkdir(parents=True, exist_ok=True)
     process_source_domain()
     process_target_domain()

@@ -7,6 +7,8 @@ Overview:
     for potential demographic bias across age groups and biological sex on the 
     unseen test set. It uses Subject-Level Majority Voting to match 
     the clinical reality and previous evaluation protocols.
+    
+    Amend model_name to the winning model from script 3-4-5
 
 Execution:
     python 6_Riemann_Bias_Evaluation.py
@@ -26,11 +28,9 @@ from sklearn.base import BaseEstimator, TransformerMixin  # Toegevoegd voor uitp
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR, CP_FM_DIR
+from config import RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR, CP_FM_DIR, SAVED_MODELS_DIR
 
-# =========================================================================
-# BLAUWDRUKKEN: Nodig om de Xdawn pipeline uit te pakken!
-# =========================================================================
+
 class MNEBandPass(BaseEstimator, TransformerMixin):
     def __init__(self, l_freq, h_freq, sfreq=500):
         self.l_freq, self.h_freq, self.sfreq = l_freq, h_freq, sfreq
@@ -44,14 +44,14 @@ class ROIExtractor(BaseEstimator, TransformerMixin):
 # =========================================================================
 
 def evaluate_riemann_bias():
-    print("🚀 STARTING STEP 6: RIEMANNIAN DEMOGRAPHIC BIAS EVALUATION (SUBJECT-LEVEL)")
+    print("STARTING STEP 6: RIEMANNIAN DEMOGRAPHIC BIAS EVALUATION (SUBJECT-LEVEL)")
 
     # 1. LAAD EXPLICIET HET WINNENDE MODEL
     model_name = "model_riemann_Theta_roi_TSSVM_Xdawn.pkl"
-    model_path = RIEMANN_DATA_DIR / model_name
+    model_path = SAVED_MODELS_DIR / model_name
     
     if not model_path.exists():
-        print(f"🚨 Het winnende model ({model_name}) is niet gevonden!")
+        print(f"Het winnende model ({model_name}) is niet gevonden!")
         sys.exit()
         
     artifact = joblib.load(model_path)
@@ -63,15 +63,15 @@ def evaluate_riemann_bias():
     print(f"-> Loaded champion model: {model_path.name}")
 
     # 2. LAAD TEST DATA EN METADATA
-    y_test_path = RIEMANN_DATA_DIR / "y_test_riemann.npy"
-    groups_test_path = RIEMANN_DATA_DIR / "groups_test_riemann.npy"
+    y_test_path = SAVED_MODELS_DIR / "y_test_riemann.npy"
+    groups_test_path = SAVED_MODELS_DIR / "groups_test_riemann.npy"
     tsv_path = CP_FM_DIR / "data" / "participants.tsv"
     
     # We weten dat Xdawn de ruwe data nodig heeft
-    X_test_path = RIEMANN_DATA_DIR / "X_test_raw.npy"
+    X_test_path = SAVED_MODELS_DIR / "X_test_raw.npy"
 
     if not (y_test_path.exists() and X_test_path.exists() and groups_test_path.exists() and tsv_path.exists()):
-        print("🚨 Essentiële testbestanden of participants.tsv ontbreken.")
+        print("Essentiële testbestanden of participants.tsv ontbreken.")
         sys.exit()
 
     y_test = np.load(y_test_path)
@@ -91,7 +91,7 @@ def evaluate_riemann_bias():
         'Pred_Label': y_pred_epochs
     })
 
-    # Groepeer per patiënt en pak de meest voorkomende voorspelling
+
     df_subject = df_preds.groupby('Subject').agg(
         True_Label=('True_Label', 'first'), 
         Pred_Label=('Pred_Label', lambda x: x.mode()[0])
@@ -106,7 +106,7 @@ def evaluate_riemann_bias():
     merged_df = pd.merge(df_subject, participants_df[['Subject', 'sex', 'age']], on='Subject', how='inner')
     
     if merged_df.empty:
-        print("🚨 Merge mislukt. Controleer of de Subject ID's overeenkomen.")
+        print("Merge mislukt. Controleer of de Subject ID's overeenkomen.")
         sys.exit()
 
     merged_df['age'] = pd.to_numeric(merged_df['age'], errors='coerce')
@@ -118,7 +118,7 @@ def evaluate_riemann_bias():
     # 6. BEREKEN ACCURAATHEID EN SENSITIVITY PER SUBGROEP
     bias_results = []
     
-    # Biologisch Geslacht
+    # Geslacht
     if 'sex' in merged_df.columns:
         for sex in merged_df['sex'].dropna().unique():
             sub_df = merged_df[merged_df['sex'] == sex]
@@ -143,7 +143,7 @@ def evaluate_riemann_bias():
 
     bias_df = pd.DataFrame(bias_results)
     
-    print("\n🏆 RIEMANNIAN DEMOGRAPHIC PERFORMANCE MATRIX (Ready for LaTeX):")
+    print("\nRIEMANNIAN DEMOGRAPHIC PERFORMANCE MATRIX (Ready for LaTeX):")
     print("-" * 75)
     print(bias_df[['Factor', 'Subgroup', 'Accuracy', 'Sensitivity', 'Sample_Size']].to_string(index=False, float_format=lambda x: f"{x:.4f}"))
     print("-" * 75)

@@ -24,11 +24,12 @@ from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import balanced_accuracy_score
+from sklearn.pipeline import make_pipeline
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import (PROCESSED_DATA_DIR, SVM_DATA_DIR, FOCUS_BAND, 
-                    CP_FM_DIR, RANDOM_STATE)
+                    CP_FM_DIR, RANDOM_STATE, SAVED_MODELS_DIR)
 
 print(f"Starting Female-Only Sensitivity Analysis ({FOCUS_BAND.upper()} Band)...")
 
@@ -81,53 +82,59 @@ groups_female = female_df['Subject'].values
 # =============================================================================
 # 3. LOAD FROZEN ARCHITECTURE (Features & Hyperparameters)
 # =============================================================================
-model_path = SVM_DATA_DIR / f"saved_model_{FOCUS_BAND}.pkl"
+model_path = SAVED_MODELS_DIR / f"saved_model_{FOCUS_BAND}.pkl"
 if not model_path.exists():
     print(f"Error: Frozen model {model_path.name} not found. Run Script 4 first.")
     sys.exit()
 
 artifact = joblib.load(model_path)
 selected_features = artifact['features']
-frozen_svm = artifact['model']
+frozen_pipeline = artifact['pipeline']
+frozen_svm = frozen_pipeline.named_steps['svc']
 
 print(f"-> Loaded {len(selected_features)} optimal mSFFS features from frozen artifact.")
 print(f"-> Loaded optimized hyperparameters: C={frozen_svm.C}, gamma={frozen_svm.gamma}")
+
 
 X_female = female_df[selected_features]
 
 # =============================================================================
 # 4. SCALING & STRATIFIED GROUP K-FOLD (Female-Only Space)
 # =============================================================================
-scaler = StandardScaler()
-X_female_scaled = pd.DataFrame(scaler.fit_transform(X_female), columns=selected_features)
-
 n_folds = 5
 cv_strategy = StratifiedGroupKFold(n_splits=n_folds)
-cv_splits = list(cv_strategy.split(X_female_scaled, y_female, groups=groups_female))
+
+cv_splits = list(cv_strategy.split(X_female, y_female, groups=groups_female))
 
 # =============================================================================
 # 5. CROSS-VALIDATION EVALUATION
 # =============================================================================
 print(f"-> Running {n_folds}-fold Stratified Group CV on female subset...")
 
-# Initialize a clean SVM model using the exact frozen parameters
-sensitivity_svm = SVC(
-    kernel='rbf',
-    C=frozen_svm.C,
-    gamma=frozen_svm.gamma,
-    class_weight=frozen_svm.class_weight,
-    random_state=RANDOM_STATE
-)
-
 fold_scores = []
 
 for fold, (train_idx, val_idx) in enumerate(cv_splits):
-    X_tr, y_tr = X_female_scaled.iloc[train_idx], y_female[train_idx]
-    X_val, y_val = X_female_scaled.iloc[val_idx], y_female[val_idx]
+    # Selecteer ONGESCHAALDE data voor deze specifieke fold
+    X_tr, y_tr = X_female.iloc[train_idx], y_female[train_idx]
+    X_val, y_val = X_female.iloc[val_idx], y_female[val_idx]
     
-    sensitivity_svm.fit(X_tr, y_tr)
+    # GEFIXT: Maak een verse pijplijn per fold aan om data leakage te voorkomen
+    sensitivity_pipeline = make_pipeline(
+        StandardScaler(),
+        SVC(
+            kernel='rbf',
+            C=frozen_svm.C,
+            gamma=frozen_svm.gamma,
+            class_weight=frozen_svm.class_weight,
+            random_state=RANDOM_STATE
+        )
+    )
     
-    y_pred = sensitivity_svm.predict(X_val)
+    # Train (en schaal) alleen op trainingsdata van deze fold
+    sensitivity_pipeline.fit(X_tr, y_tr)
+    
+    # Predict (en schaal) de testdata van deze fold
+    y_pred = sensitivity_pipeline.predict(X_val)
     score = balanced_accuracy_score(y_val, y_pred)
     
     fold_scores.append(score)

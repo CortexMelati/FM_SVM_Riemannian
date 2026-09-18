@@ -30,7 +30,7 @@ import mne
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import RIEMANN_DATA_DIR, SVM_FIGURES_DIR, RANDOM_STATE, BANDS, BEST_BANDS, SFREQ_MAP, ACTIVE_DATASET_NAME
+from config import RIEMANN_DATA_DIR, SVM_FIGURES_DIR, RANDOM_STATE, BANDS, BEST_BANDS, SFREQ_MAP, ACTIVE_DATASET_NAME, SAVED_MODELS_DIR
 
 SFREQ = SFREQ_MAP.get(ACTIVE_DATASET_NAME, 500)
 
@@ -42,11 +42,11 @@ class MNEBandPass(BaseEstimator, TransformerMixin):
         return mne.filter.filter_data(X.astype(np.float64), sfreq=self.sfreq, l_freq=self.l_freq, h_freq=self.h_freq, method='iir', iir_params=dict(order=4, ftype='butter', output='sos'), verbose=False)
 
 def run_riemann_ablation():
-    print("🚀 STARTING ABLATION STUDY: NESTED VS SINGLE CV (RIEMANNIAN)\n" + "="*70)
+    print("STARTING ABLATION STUDY: NESTED VS SINGLE CV (RIEMANNIAN)\n" + "="*70)
 
-    X_raw = np.load(RIEMANN_DATA_DIR / "X_train_raw.npy")
-    y = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
-    groups = np.load(RIEMANN_DATA_DIR / "groups_train_riemann.npy")
+    X_raw = np.load(SAVED_MODELS_DIR / "X_train_raw.npy")
+    y = np.load(SAVED_MODELS_DIR / "y_train_riemann.npy")
+    groups = np.load(SAVED_MODELS_DIR / "groups_train_riemann.npy")
 
     svm_param_grid = [
         {'svm__C': [0.001, 0.01, 0.1, 1, 10], 'svm__kernel': ['linear']},
@@ -60,7 +60,7 @@ def run_riemann_ablation():
 
     for band_name in BEST_BANDS:
         l_freq, h_freq = BANDS[band_name]
-        print(f"📡 PROCESSING BAND: {band_name.upper()} (TSSVM_Xdawn)")
+        print(f"PROCESSING BAND: {band_name.upper()} (TSSVM_Xdawn)")
 
         # Bouw de volledige pipeline op
         steps = [
@@ -81,7 +81,7 @@ def run_riemann_ablation():
         clf_single.fit(X_raw, y, groups=groups)
         single_cv_score = clf_single.best_score_
         
-        # --- 2. Nested CV (Unbiased - Handmatige loop) ---
+        # --- 2. Nested CV (Unbiased) ---
         print("   -> Calculating Nested CV (Iterative evaluation)...")
         nested_scores = []
         for train_idx, test_idx in cv_outer.split(X_raw, y, groups=groups):
@@ -158,7 +158,7 @@ def run_riemann_ablation():
     plt.savefig(plot_path, dpi=300, facecolor='white', bbox_inches='tight')
     plt.close()
     
-    print(f"✅ Figuur opgeslagen in: {plot_path}")
+    print(f"Figuur opgeslagen in: {plot_path}")
     print("="*70)
 
 if __name__ == "__main__":

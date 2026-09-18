@@ -1,6 +1,6 @@
 import importlib
 
-# Alle externe packages uit jouw code
+# all packages from code
 packages = {
     "MNE-Python": "mne",
     "MNE-Connectivity": "mne_connectivity",

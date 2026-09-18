@@ -36,7 +36,8 @@ from sklearn.metrics import (accuracy_score, precision_score, recall_score,
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR, BANDS, BEST_CHANNELS_EVALUATE, CHANNELS_1020, RANDOM_STATE, CP_FM_DIR
+from config import (RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR, BANDS, BEST_CHANNELS_EVALUATE, 
+                    CHANNELS_1020, RANDOM_STATE, CP_FM_DIR, SAVED_MODELS_DIR)
 
 
 class AverageFrequencies(BaseEstimator, TransformerMixin):
@@ -90,31 +91,36 @@ def plot_permutation_distribution(permuted_scores, actual_acc, pvalue, target_ba
     
     plt.figure(figsize=(8, 6))
     
-    # Gebruik KDE (Kernel Density Estimation) in plaats van harde histogram bins
+    
     sns.kdeplot(
         permuted_scores, 
         fill=True, 
         color='#93c59e', 
         alpha=0.6, 
         linewidth=2.5,
-        bw_adjust=1.5, # Maakt de curve net iets vloeiender
+        bw_adjust=1.5, 
         label='Permuted Scores (Null Distribution)'
     )
     
-    # Lijn voor de daadwerkelijke model score
+    
     plt.axvline(actual_acc, color='#d62728', linestyle='dashed', linewidth=2.5, 
                 label=f'Actual Model Score ({actual_acc:.4f})')
     
-    # Lijn voor het gemiddelde toevalsniveau
+    
     plt.axvline(np.mean(permuted_scores), color='black', linestyle='dotted', linewidth=2, 
                 label=f'Chance Level (Mean: {np.mean(permuted_scores):.4f})')
 
-    plt.title(f"Permutation Test Distribution (1000 Iterations)\n({target_band.upper()} Band - p = {pvalue:.4f})", fontsize=14, pad=15)
-    plt.xlabel('Balanced Accuracy', fontsize=12)
-    plt.ylabel('Density', fontsize=12)
     
-    # Verplaats de legenda naar een mooie plek
-    plt.legend(frameon=True, loc='upper left', fontsize=10)
+    plt.title(f"Permutation Test Distribution (1000 Iterations)\n({target_band.upper()} Band - p = {pvalue:.4f})", fontsize=16, pad=15)
+    plt.xlabel('Balanced Accuracy', fontsize=16)
+    plt.ylabel('Density', fontsize=16)
+    
+    
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    
+    
+    plt.legend(frameon=False, loc='upper left', fontsize=12)
 
     ax = plt.gca()
     ax.spines['top'].set_visible(False)
@@ -122,7 +128,7 @@ def plot_permutation_distribution(permuted_scores, actual_acc, pvalue, target_ba
 
     plt.tight_layout()
     
-    RIEMANN_FIGURES_DIR.mkdir(parents=True, exist_ok=True) # Map is aangepast naar RIEMANN map
+    RIEMANN_FIGURES_DIR.mkdir(parents=True, exist_ok=True) 
     plot_path = RIEMANN_FIGURES_DIR / f"Figure_Permutation_Distribution_{target_band}.png"
     plt.savefig(plot_path, dpi=300, facecolor='white', bbox_inches='tight')
     plt.close()
@@ -130,29 +136,29 @@ def plot_permutation_distribution(permuted_scores, actual_acc, pvalue, target_ba
 
 
 def evaluate_riemann_testset():
-    print("🚀 STARTING STEP 5: RIEMANNIAN EVALUATION ON UNSEEN TEST SET (SUBJECT-LEVEL)")
+    print("STARTING STEP 5: RIEMANNIAN EVALUATION ON UNSEEN TEST SET (SUBJECT-LEVEL)")
 
-    X_train_raw = np.load(RIEMANN_DATA_DIR / "X_train_raw.npy")
-    y_train = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
-    X_test_raw = np.load(RIEMANN_DATA_DIR / "X_test_raw.npy")
-    y_test = np.load(RIEMANN_DATA_DIR / "y_test_riemann.npy")
-    groups_test = np.load(RIEMANN_DATA_DIR / "groups_test_riemann.npy") 
+    X_train_raw = np.load(SAVED_MODELS_DIR / "X_train_raw.npy")
+    y_train = np.load(SAVED_MODELS_DIR / "y_train_riemann.npy")
+    X_test_raw = np.load(SAVED_MODELS_DIR / "X_test_raw.npy")
+    y_test = np.load(SAVED_MODELS_DIR / "y_test_riemann.npy")
+    groups_test = np.load(SAVED_MODELS_DIR / "groups_test_riemann.npy") 
     
-    scoreboard_path = RIEMANN_DATA_DIR / "riemann_comprehensive_scoreboard.csv"
+    scoreboard_path = RIEMANN_DATA_DIR / "riemann_comprehensive_scoreboard_10x_cv5.csv"
     if not scoreboard_path.exists():
-        sys.exit("🚨 Scoreboard not found! Please run Script 2/3 first.")
+        sys.exit(" Scoreboard not found! Please run Script 2/3 first.")
     scoreboard = pd.read_csv(scoreboard_path)
     
-    # Valideer of 'Layout' in de scoreboard staat, anders exit!
+    
     if 'Layout' not in scoreboard.columns:
-        sys.exit("🚨 Kolom 'Layout' ontbreekt in scoreboard! Voeg deze toe in Script 3 (met waarden 'ROI' of 'WHOLE').")
+        sys.exit(" Kolom 'Layout' ontbreekt in scoreboard! Voeg deze toe in Script 3 (met waarden 'ROI' of 'WHOLE').")
 
     ROI_INDICES = [CHANNELS_1020.index(ch) for ch in BEST_CHANNELS_EVALUATE]
     valid_architectures = ['TSSVM_Cov', 'TSSVM_Xdawn', 'TSSVM_Coh'] # if different amend
 
     final_results = []
     
-    # Dubbele loop: over layouts én over frequentiebanden
+    
     layouts_to_test = ['ROI', 'WHOLE']
 
     for layout in layouts_to_test:
@@ -165,7 +171,7 @@ def evaluate_riemann_testset():
                                      (scoreboard['Architecture'].isin(valid_architectures))]
                                      
             if band_scores.empty:
-                print(f"⚠️ Geen getrainde modellen gevonden voor {band_name.upper()} - {layout}. Skipping...")
+                print(f"Geen getrainde modellen gevonden voor {band_name.upper()} - {layout}. Skipping...")
                 continue
                 
             best_row = band_scores.loc[band_scores['CV_Balanced_Accuracy_Mean'].idxmax()]
@@ -175,39 +181,62 @@ def evaluate_riemann_testset():
             print(f"-> Optimal Architecture: {arch}")
             print(f"-> Optimal Params: C={params['C']}, Kernel={params['kernel']}")
             
-            # Bouw de stappen op
-            steps = [('filter', MNEBandPass(l_freq, h_freq, 500))]
+            # # Bouw de stappen old ======================================================================
+            # steps = [('filter', MNEBandPass(l_freq, h_freq, 500))]
             
-            # ALLEEN toevoegen als de layout ROI is
-            if layout == 'ROI':
-                steps.append(('roi', ROIExtractor(ROI_INDICES)))
+            # # ALLEEN toevoegen als de layout ROI is
+            # if layout == 'ROI':
+            #     steps.append(('roi', ROIExtractor(ROI_INDICES)))
             
-            if arch == 'TSSVM_Cov':
-                steps.extend([('cov', Covariances(estimator='oas')), ('ts', TangentSpace(metric='riemann'))])
-            elif arch == 'TSSVM_Xdawn':
-                steps.extend([('xdawn', XdawnCovariances(nfilter=6, estimator='oas')), ('ts', TangentSpace(metric='riemann'))])
-            elif arch == 'TSSVM_Coh':
-                steps.extend([
-                    ('coh', Coherences(coh='lagged')), 
-                    ('avg_freq', AverageFrequencies()), 
-                    ('spd', NearestSPD()), 
-                    ('ts', TangentSpace(metric='riemann'))
-                ])
+            # if arch == 'TSSVM_Cov':
+            #     steps.extend([('cov', Covariances(estimator='oas')), ('ts', TangentSpace(metric='riemann'))])
+            # elif arch == 'TSSVM_Xdawn':
+            #     steps.extend([('xdawn', XdawnCovariances(nfilter=6, estimator='oas')), ('ts', TangentSpace(metric='riemann'))])
+            # elif arch == 'TSSVM_Coh':
+            #     steps.extend([
+            #         ('coh', Coherences(coh='lagged')), 
+            #         ('avg_freq', AverageFrequencies()), 
+            #         ('spd', NearestSPD()), 
+            #         ('ts', TangentSpace(metric='riemann'))
+            #     ])
                 
-            steps.extend([
-                ('scaler', StandardScaler()),
-                ('svm', SVC(C=params['C'], kernel=params['kernel'], class_weight='balanced', probability=True, random_state=RANDOM_STATE))
-            ])
+            # steps.extend([
+            #     ('scaler', StandardScaler()),
+            #     ('svm', SVC(C=params['C'], kernel=params['kernel'], class_weight='balanced', probability=True, random_state=RANDOM_STATE))
+            # ])
             
-            pipeline = Pipeline(steps)
-            print(f"-> Training optimal pipeline on full training data ({layout} channels)...")
-            pipeline.fit(X_train_raw, y_train)
+            # pipeline = Pipeline(steps)
+            # print(f"-> Training optimal pipeline on full training data ({layout} channels)...")
+            # pipeline.fit(X_train_raw, y_train)
+            #===================================================================================================
+
+            
+            layout_str = 'whole' if layout == 'WHOLE' else 'roi'
+            model_filename = f"model_riemann_{band_name}_{layout_str}_{arch}_10x_cv5.pkl"
+            model_path = SAVED_MODELS_DIR / model_filename
+            
+            try:
+                artifact = joblib.load(model_path)
+            except FileNotFoundError:
+                print(f"⚠️ Waarschuwing: {model_filename} niet gevonden. Skipping...")
+                continue
+            
+            
+            pipeline = artifact['model']
+            
+            train_mean = artifact.get('training_balanced_accuracy', 0.0)
+            train_std = artifact.get('training_std', 0.0)
+            
+            print(f"-> Ingeladen model: {arch} (Train Bal. Acc: {train_mean:.3f})")
+
+            # ========================================================================================
+
 
             print("-> Predicting on Unseen Test Data (1-second epochs)...")
             y_pred_epochs = pipeline.predict(X_test_raw)
             y_prob_epochs = pipeline.predict_proba(X_test_raw)[:, 1]
 
-            # --- APPLY MAJORITY VOTING FOR SUBJECT-LEVEL EVALUATION ---
+            
             print("-> Aggregating predictions to Subject-Level...")
             df_preds = pd.DataFrame({
                 'Subject': groups_test,
@@ -218,7 +247,8 @@ def evaluate_riemann_testset():
 
             df_subject = df_preds.groupby('Subject').agg(
                 True_Label=('True_Label', 'first'), 
-                Pred_Class=('Pred_Class', lambda x: x.mode()[0]), 
+                Pred_Class=('Pred_Class', lambda x: x.mode()[0]),
+                Consistency=('Pred_Class', lambda x: (x == x.mode()[0]).mean()),
                 Pred_Prob=('Pred_Prob', 'mean') 
             ).reset_index()
 
@@ -226,7 +256,7 @@ def evaluate_riemann_testset():
             y_pred_sub = df_subject['Pred_Class'].values
             y_prob_sub = df_subject['Pred_Prob'].values
 
-            # --- CALCULATE METRICS ON SUBJECT LEVEL ---
+            
             acc = accuracy_score(y_test_sub, y_pred_sub)
             prec = precision_score(y_test_sub, y_pred_sub, zero_division=0)
             rec = recall_score(y_test_sub, y_pred_sub, zero_division=0)
@@ -243,7 +273,7 @@ def evaluate_riemann_testset():
                 fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
                 fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
             else:
-                print(f"⚠️ Waarschuwing: Confusion matrix heeft onverwachte vorm voor {band_name}-{layout}: {cm.shape}")
+                print(f"Waarschuwing: Confusion matrix heeft onverwachte vorm voor {band_name}-{layout}: {cm.shape}")
                 fpr, fnr = 0.0, 0.0
 
             # --- PERMUTATION TEST ---
@@ -257,23 +287,45 @@ def evaluate_riemann_testset():
 
             pvalue = (np.sum(np.array(permuted_scores) >= acc) + 1) / (n_permutations + 1)
             print(f"-> Permutation P-value: {pvalue:.4f}")
+            
 
-            # Roep de KDE plot functie aan (zorg dat je die functie ook bovenin Script 5 definieert, net als bij SVM)
+            mean_consistency = df_subject['Consistency'].mean()
+            
+            report_text = (
+                f"====================================================\n"
+                f" FINAL TEST METRICS SUBJECT - {arch} ({layout}) {band_name.upper()} \n"
+                f"====================================================\n"
+                f"Intra-Subject Consistency: {mean_consistency:.2%}\n"
+                f"Accuracy:        {acc:.4f}\n"
+                f"Precision:       {prec:.4f}\n"
+                f"Recall:          {rec:.4f}\n"
+                f"FPR:             {fpr:.4f}\n"
+                f"FNR:             {fnr:.4f}\n"
+                f"ROC-AUC:         {auc:.4f}\n"
+                f"AUPRC:           {auprc:.4f}\n"
+                f"Brier Score:     {brier:.4f}\n"
+                f"ECE:             {ece:.4f}\n"
+                f"Permutation P:   {pvalue:.4f}\n"
+                f"====================================================\n"
+            )
+            report_path = RIEMANN_DATA_DIR / f"final_test_metrics_report_{band_name.lower()}_{layout.lower()}_{arch}.txt"
+            with open(report_path, "w") as f:
+                f.write(report_text)
+
             plot_permutation_distribution(permuted_scores, acc, pvalue, band_name)
             
             # Reconstruct the filename exactly as saved in Script 3
             layout_str = 'whole' if layout == 'WHOLE' else 'roi'
-            model_filename = f"model_riemann_{band_name.lower()}_{layout_str}_{arch}.pkl"
-            model_path = RIEMANN_DATA_DIR / model_filename
+            model_filename = f"model_riemann_{band_name.lower()}_{layout_str}_{arch}_10x_cv5.pkl"
+            model_path = SAVED_MODELS_DIR / model_filename
             
             try:
                 artifact = joblib.load(model_path)
             except FileNotFoundError:
-                print(f"⚠️ Waarschuwing: {model_filename} niet gevonden. CV scores worden op 0.0 gezet.")
+                print(f"Waarschuwing: {model_filename} niet gevonden. CV scores worden op 0.0 gezet.")
                 artifact = {}
             
-            
-            
+        
             train_mean = artifact.get('training_balanced_accuracy', 0.0)
             train_std = artifact.get('training_std', 0.0)
 
@@ -297,12 +349,41 @@ def evaluate_riemann_testset():
             
             
             # --- GENERATE PLOTS ---
+            annot_labels = np.empty_like(cm, dtype=object)
+            
+            if cm.shape == (2, 2):
+                TN_subjs = df_subject[(df_subject['True_Label'] == 0) & (df_subject['Pred_Class'] == 0)]['Subject']
+                FP_subjs = df_subject[(df_subject['True_Label'] == 0) & (df_subject['Pred_Class'] == 1)]['Subject']
+                FN_subjs = df_subject[(df_subject['True_Label'] == 1) & (df_subject['Pred_Class'] == 0)]['Subject']
+                TP_subjs = df_subject[(df_subject['True_Label'] == 1) & (df_subject['Pred_Class'] == 1)]['Subject']
+                
+                
+                len_tn = len(df_preds[df_preds['Subject'].isin(TN_subjs)])
+                len_fp = len(df_preds[df_preds['Subject'].isin(FP_subjs)])
+                len_fn = len(df_preds[df_preds['Subject'].isin(FN_subjs)])
+                len_tp = len(df_preds[df_preds['Subject'].isin(TP_subjs)])
+                
+                
+                annot_labels[0, 0] = f"{cm[0, 0]}\n{len_tn}\n{len_tn // 30}"
+                annot_labels[0, 1] = f"{cm[0, 1]}\n{len_fp}\n{len_fp // 30}"
+                annot_labels[1, 0] = f"{cm[1, 0]}\n{len_fn}\n{len_fn // 30}"
+                annot_labels[1, 1] = f"{cm[1, 1]}\n{len_tp}\n{len_tp // 30}"
+            else:
+                for i in range(cm.shape[0]):
+                    for j in range(cm.shape[1]):
+                        annot_labels[i, j] = str(cm[i, j])
+
+            
+            display_arch = arch.replace('Xdawn', 'xDAWN')
+
             plt.figure(figsize=(6, 5))
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Oranges',
+            sns.heatmap(cm, annot=annot_labels, fmt='', cmap='Oranges',
                         xticklabels=['Healthy (0)', 'Fibro (1)'], 
                         yticklabels=['Healthy (0)', 'Fibro (1)'],
-                        annot_kws={"size": 16})
-            plt.title(f'Riemannian FINAL Validation ({arch} - {band_name.upper()} - {layout})\nSubject-Level (Accuracy: {acc:.2%})', fontsize=14)
+                        annot_kws={"size": 14}) 
+            
+            
+            plt.title(f'Riemannian FINAL Validation ({display_arch} - {band_name.upper()} - {layout})\nSubject-Level (Accuracy: {acc:.2%})', fontsize=14)
             plt.ylabel('True Clinical Diagnosis', fontsize=12)
             plt.xlabel('Predicted Diagnosis (Majority Vote)', fontsize=12)
             plt.tight_layout()
@@ -337,7 +418,7 @@ def evaluate_riemann_testset():
             ax.spines['right'].set_visible(False)
 
             handles, labels = scatter.get_legend_handles_labels()
-            plt.legend(handles=handles, labels=['Healthy Control (HC)', 'Fibromyalgia (FM)'], title='Diagnosis', frameon=True)
+            plt.legend(handles=handles, labels=['Healthy Control (HC)', 'Fibromyalgia (FM)'], title='Diagnosis', frameon=False)
             plt.tight_layout()
             
             tsne_path = RIEMANN_FIGURES_DIR / f"Figure_5_tsne_riemann_{band_name}_{layout}_{arch}.png"
@@ -349,7 +430,7 @@ def evaluate_riemann_testset():
     csv_path = RIEMANN_DATA_DIR / "final_riemannian_test_table.csv"
     results_df.to_csv(csv_path, index=False)
     
-    print(f"\n{'='*70}\n🏆 ALL BANDS & LAYOUTS EVALUATED SUCCESSFULLY!\n{'='*70}")
+    print(f"\n{'='*70}\nALL BANDS & LAYOUTS EVALUATED SUCCESSFULLY!\n{'='*70}")
     print("Here is your final data for the LaTeX Table 2:\n")
     print(results_df.to_string(index=False))
 

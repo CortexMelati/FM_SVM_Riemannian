@@ -39,7 +39,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR, CROSS_TARGET_DATASET, RANDOM_STATE
+from config import RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR, CROSS_TARGET_DATASET, RANDOM_STATE, SAVED_MODELS_DIR
 
 # =========================================================================
 # CUSTOM TRANSFORMERS
@@ -77,7 +77,7 @@ class RiemannianAligner(BaseEstimator, TransformerMixin):
 # =========================================================================
 
 def run_alignment_cross_domain():
-    print("🚀 STARTING SCRIPT 7: RIEMANNIAN CROSS-DOMAIN VALIDATION (FRÉCHET ALIGNMENT)")
+    print("STARTING SCRIPT 7: RIEMANNIAN CROSS-DOMAIN VALIDATION (FRÉCHET ALIGNMENT)")
 
     target_models = [
         "model_riemann_theta_roi_TSSVM_xDAWN.pkl",
@@ -86,13 +86,13 @@ def run_alignment_cross_domain():
     ]
     
     for model_name in target_models:
-        model_path = RIEMANN_DATA_DIR / model_name
+        model_path = SAVED_MODELS_DIR / model_name
         if not model_path.exists():
             print(f"\n-> Info: Model {model_name} niet gevonden. Skipping...")
             continue
             
         arch_name = model_path.stem.split("roi_")[-1]
-        print(f"\n{'='*70}\n🧠 Evaluating Riemannian Alignment for: {model_name}\n{'='*70}")
+        print(f"\n{'='*70}\nEvaluating Riemannian Alignment for: {model_name}\n{'='*70}")
             
         artifact = joblib.load(model_path)
         full_pipeline = artifact['model']
@@ -100,27 +100,25 @@ def run_alignment_cross_domain():
         layout = artifact['layout']
         frozen_svm = full_pipeline.named_steps['svm'] 
         
-        # Extract steps up to the Covariance/Coherence matrix calculation
-        # This dynamic search ensures both Xdawn and Coherence architectures are supported
         try:
             cov_step_idx = [i for i, step in enumerate(full_pipeline.steps) if any(x in step[0] for x in ['cov', 'xdawn', 'coh', 'spd'])][-1]
             cov_pipeline = Pipeline(full_pipeline.steps[:cov_step_idx+1])
         except IndexError:
-            sys.exit(f"🚨 Fout: Kon de feature extraction stap niet vinden in pipeline voor {model_name}")
+            sys.exit(f"Fout: Kon de feature extraction stap niet vinden in pipeline voor {model_name}")
         
-        y_source = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
-        y_target = np.load(RIEMANN_DATA_DIR / f"target_y_{CROSS_TARGET_DATASET.lower()}.npy")
-        groups_target = np.load(RIEMANN_DATA_DIR / f"target_groups_{CROSS_TARGET_DATASET.lower()}.npy")
+        y_source = np.load(SAVED_MODELS_DIR / "y_train_riemann.npy")
+        y_target = np.load(SAVED_MODELS_DIR / f"target_y_{CROSS_TARGET_DATASET.lower()}.npy")
+        groups_target = np.load(SAVED_MODELS_DIR / f"target_groups_{CROSS_TARGET_DATASET.lower()}.npy")
 
         if 'Cov' in arch_name:
-            X_source_raw = np.load(RIEMANN_DATA_DIR / f"covs_train_{band.lower()}_{layout.lower()}.npy")
-            X_target_raw = np.load(RIEMANN_DATA_DIR / f"target_covs_{CROSS_TARGET_DATASET.lower()}_{band.capitalize()}_{layout.lower()}.npy")
+            X_source_raw = np.load(SAVED_MODELS_DIR / f"covs_train_{band.lower()}_{layout.lower()}.npy")
+            X_target_raw = np.load(SAVED_MODELS_DIR / f"target_covs_{CROSS_TARGET_DATASET.lower()}_{band.capitalize()}_{layout.lower()}.npy")
             # For TSSVM_Cov, the preloaded data ARE the covariances. No cov_pipeline needed.
             C_source = X_source_raw
             C_target = X_target_raw
         else:
-            X_source_raw = np.load(RIEMANN_DATA_DIR / "X_train_raw.npy")
-            X_target_raw = np.load(RIEMANN_DATA_DIR / f"target_X_{CROSS_TARGET_DATASET.lower()}_raw.npy")
+            X_source_raw = np.load(SAVED_MODELS_DIR / "X_train_raw.npy")
+            X_target_raw = np.load(SAVED_MODELS_DIR / f"target_X_{CROSS_TARGET_DATASET.lower()}_raw.npy")
             print("-> Extracting Covariance matrices...")
             C_source = cov_pipeline.transform(X_source_raw)
             C_target = cov_pipeline.transform(X_target_raw)
@@ -221,9 +219,9 @@ def run_alignment_cross_domain():
             plt.savefig(RIEMANN_FIGURES_DIR / fig_name, dpi=300)
             plt.close()
             
-            print(f"✅ Opgeslagen: Tabel en Plot voor {arch_name}!")
+            print(f"Opgeslagen: Tabel en Plot voor {arch_name}!")
 
-    print("\n✅ SCRIPT 7 (ALIGNMENT) VOLLEDIG AFGEROND.")
+    print("\nSCRIPT 7 (ALIGNMENT) VOLLEDIG AFGEROND.")
 
 if __name__ == "__main__":
     run_alignment_cross_domain()

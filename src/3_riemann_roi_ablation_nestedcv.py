@@ -10,7 +10,7 @@ Overview:
     so they can be compared head-to-head in Script 5.
 
 Execution:
-    python 3_riemann_roi_ablation.py
+    python 3_riemann_roi_ablation_nestedcv.py
 =============================================================================
 """
 
@@ -36,7 +36,7 @@ warnings.filterwarnings("ignore", message="DC and Nyquist bins are not defined*"
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import RANDOM_STATE, BANDS, BEST_BANDS, RIEMANN_DATA_DIR, SFREQ_MAP, ACTIVE_DATASET_NAME, CHANNELS_1020, BEST_CHANNELS_EVALUATE
+from config import RANDOM_STATE, BANDS, BEST_BANDS, RIEMANN_DATA_DIR, SFREQ_MAP, ACTIVE_DATASET_NAME, CHANNELS_1020, BEST_CHANNELS_EVALUATE, SAVED_MODELS_DIR
 
 # =============================================================================
 # TOGGLE: TRUE = 19 Channels (WHOLE) | FALSE = 9 Channels (ROI)
@@ -65,7 +65,7 @@ def run_ablation():
     channel_count = 19 if RUN_AS_WHOLE_BRAIN else 9
     print(f"STARTING SCRIPT 3: ABLATION ({channel_count} CHANNELS - {LAYOUT_NAME})")
     
-    comprehensive_path = RIEMANN_DATA_DIR / "riemann_comprehensive_scoreboard.csv"
+    comprehensive_path = RIEMANN_DATA_DIR / "riemann_comprehensive_scoreboard_nested.csv"
     if comprehensive_path.exists():
         df_existing = pd.read_csv(comprehensive_path)
     else:
@@ -75,9 +75,9 @@ def run_ablation():
     bands_str = ", ".join([b.upper() for b in best_bands])
     print(f"Running {LAYOUT_NAME} Ablation on the following bands: {bands_str}.")
 
-    X_raw = np.load(RIEMANN_DATA_DIR / "X_train_raw.npy")
-    y = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
-    groups = np.load(RIEMANN_DATA_DIR / "groups_train_riemann.npy")
+    X_raw = np.load(SAVED_MODELS_DIR / "X_train_raw.npy")
+    y = np.load(SAVED_MODELS_DIR / "y_train_riemann.npy")
+    groups = np.load(SAVED_MODELS_DIR / "groups_train_riemann.npy")
     
     svm_param_grid = [
         {'C': [0.001, 0.01, 0.1, 1, 10], 'kernel': ['linear']},
@@ -93,7 +93,7 @@ def run_ablation():
         
         # DE FIX: Dit zoekt nu netjes naar _whole.npy of _roi.npy
         cov_file = f"covs_train_{band_name}_whole.npy" if RUN_AS_WHOLE_BRAIN else f"covs_train_{band_name}_roi.npy"
-        X_covs = np.load(RIEMANN_DATA_DIR / cov_file)
+        X_covs = np.load(SAVED_MODELS_DIR / cov_file)
 
         for p_name in architectures:
             arch_start_time = time.time()
@@ -176,7 +176,7 @@ def run_ablation():
             
             if arch == 'TSSVM_Cov':
                 final_steps = [('ts', TangentSpace(metric='riemann')), ('scaler', StandardScaler())]
-                X_final_input = np.load(RIEMANN_DATA_DIR / cov_file)
+                X_final_input = np.load(SAVED_MODELS_DIR / cov_file)
             elif arch == 'TSSVM_Xdawn':
                 final_steps = [('filter', MNEBandPass(BANDS[band_name][0], BANDS[band_name][1], SFREQ))]
                 if not RUN_AS_WHOLE_BRAIN:
@@ -195,9 +195,9 @@ def run_ablation():
             final_pipe.fit(X_final_input, y)
             
             layout_str = 'whole' if RUN_AS_WHOLE_BRAIN else 'roi'
-            best_name = f"model_riemann_{band_name}_{layout_str}_{arch}.pkl"
+            best_name = f"model_riemann_{band_name}_{layout_str}_{arch}_nested.pkl"
             
-            joblib.dump({'model': final_pipe, 'band': band_name, 'layout': layout_str, 'training_balanced_accuracy': row['CV_Balanced_Accuracy']}, RIEMANN_DATA_DIR / best_name)
+            joblib.dump({'model': final_pipe, 'band': band_name, 'layout': layout_str, 'training_balanced_accuracy': row['CV_Balanced_Accuracy']}, SAVED_MODELS_DIR / best_name)
 
     # add to earlier runs
     if not df_existing.empty:

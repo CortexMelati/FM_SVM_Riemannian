@@ -50,7 +50,7 @@ except ImportError:
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 
-from config import RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR, CROSS_TARGET_DATASET, RANDOM_STATE
+from config import RIEMANN_DATA_DIR, RIEMANN_FIGURES_DIR, CROSS_TARGET_DATASET, RANDOM_STATE, SAVED_MODELS_DIR
 
 class MNEBandPass(BaseEstimator, TransformerMixin):
     def __init__(self, l_freq, h_freq, sfreq=500):
@@ -65,20 +65,20 @@ class ROIExtractor(BaseEstimator, TransformerMixin):
 
 
 def run_unified_cross_domain():
-    print("🚀 STARTING SCRIPT 7: UNIFIED RIEMANNIAN CROSS-DOMAIN VALIDATION")
+    print("STARTING SCRIPT 7: UNIFIED RIEMANNIAN CROSS-DOMAIN VALIDATION")
 
     target_models = [
-        "model_riemann_Theta_roi_TSSVM_Xdawn.pkl"
+        "model_riemann_Theta_roi_TSSVM_Xdawn.pkl" # amend when needed
     ]
     
     for model_name in target_models:
-        model_path = RIEMANN_DATA_DIR / model_name
+        model_path = SAVED_MODELS_DIR / model_name
         if not model_path.exists():
             print(f"\n-> Info: Model {model_name} niet gevonden. Gaan door naar de volgende...")
             continue
             
         arch_name = model_path.stem.split("roi_")[-1]
-        print(f"\n{'='*70}\n🧠 Evaluating Cross-Domain Robustness for: {model_name}\n{'='*70}")
+        print(f"\n{'='*70}\nEvaluating Cross-Domain Robustness for: {model_name}\n{'='*70}")
             
         artifact = joblib.load(model_path)
         full_pipeline = artifact['model']
@@ -88,25 +88,25 @@ def run_unified_cross_domain():
         fe_pipeline = Pipeline(full_pipeline.steps[:-1])
         frozen_svm = full_pipeline.named_steps['svm'] 
         
-        y_source = np.load(RIEMANN_DATA_DIR / "y_train_riemann.npy")
-        y_target = np.load(RIEMANN_DATA_DIR / f"target_y_{CROSS_TARGET_DATASET.lower()}.npy")
-        groups_target = np.load(RIEMANN_DATA_DIR / f"target_groups_{CROSS_TARGET_DATASET.lower()}.npy")
+        y_source = np.load(SAVED_MODELS_DIR / "y_train_riemann.npy")
+        y_target = np.load(SAVED_MODELS_DIR / f"target_y_{CROSS_TARGET_DATASET.lower()}.npy")
+        groups_target = np.load(SAVED_MODELS_DIR / f"target_groups_{CROSS_TARGET_DATASET.lower()}.npy")
 
         # --- SMART ROUTING ---
         if 'Cov' in arch_name:
             print("-> SMART ROUTING: Loading precomputed Covariance matrices...")
-            X_source_input = np.load(RIEMANN_DATA_DIR / f"covs_train_{band.lower()}_{layout.lower()}.npy")
-            target_path = RIEMANN_DATA_DIR / f"target_covs_{CROSS_TARGET_DATASET.lower()}_{band.capitalize()}_{layout.lower()}.npy"
+            X_source_input = np.load(SAVED_MODELS_DIR / f"covs_train_{band.lower()}_{layout.lower()}.npy")
+            target_path = SAVED_MODELS_DIR / f"target_covs_{CROSS_TARGET_DATASET.lower()}_{band.capitalize()}_{layout.lower()}.npy"
             if not target_path.exists():
-                sys.exit(f"🚨 Target data mist: {target_path.name}")
+                sys.exit(f"Target data mist: {target_path.name}")
             X_target_input = np.load(target_path)
             
         else:
             print("-> SMART ROUTING: Loading RAW epochs for xDAWN spatial filtering...")
-            X_source_input = np.load(RIEMANN_DATA_DIR / "X_train_raw.npy")
-            target_path = RIEMANN_DATA_DIR / f"target_X_{CROSS_TARGET_DATASET.lower()}_raw.npy"
+            X_source_input = np.load(SAVED_MODELS_DIR / "X_train_raw.npy")
+            target_path = SAVED_MODELS_DIR / f"target_X_{CROSS_TARGET_DATASET.lower()}_raw.npy"
             if not target_path.exists():
-                sys.exit(f"🚨 Target data mist: {target_path.name}. Voeg de save-regel toe in script 1!")
+                sys.exit(f"Target data mist: {target_path.name}. Voeg de save-regel toe in script 1!")
             X_target_input = np.load(target_path)
 
         print("-> Projecting Source & Target to the unified Tangent Space...")
@@ -119,7 +119,7 @@ def run_unified_cross_domain():
         max_folds = 10 
         results = []
 
-        print(f"\n📊 Target Dataset Demographics: {class_counts.to_dict()}")
+        print(f"\nTarget Dataset Demographics: {class_counts.to_dict()}")
         print(f"-> Set Maximum Stratified Folds to: {max_folds}")
         print(f"\nRunning iterative testing (2 to {max_folds} Folds)...")
         print(f"{'Folds':<10} | {'Avg Train Subs':<15} | {'Transfer Acc':<15} | {'Direct Acc':<15}")
@@ -155,7 +155,7 @@ def run_unified_cross_domain():
                     except Exception:
                         pass 
                 
-                # FIX: Subject-Level Voting met Balanced Accuracy!
+                # Subject-Level Voting met Balanced Accuracy
                 df_fold = pd.DataFrame({'Subject': groups_target[test_idx], 'True': y_tgt_te, 'Dir': pred_d, 'Trans': pred_tr})
                 df_sub = df_fold.groupby('Subject').agg(True_L=('True', 'first'), V_Dir=('Dir', lambda x: x.mode()[0]), V_Tr=('Trans', lambda x: x.mode()[0])).reset_index()
                 
@@ -193,9 +193,9 @@ def run_unified_cross_domain():
             plt.savefig(RIEMANN_FIGURES_DIR / fig_name, dpi=300)
             plt.close()
             
-            print(f"✅ Opgeslagen: Tabel 1 en Figuur 7 voor {arch_name}!")
+            print(f"Opgeslagen: Tabel 1 en Figuur 7 voor {arch_name}!")
 
-    print("\n✅ SCRIPT 7 VOLLEDIG AFGEROND.")
+    print("\nSCRIPT 7 VOLLEDIG AFGEROND.")
 
 if __name__ == "__main__":
     run_unified_cross_domain()

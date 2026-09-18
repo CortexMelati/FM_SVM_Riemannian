@@ -72,7 +72,7 @@ scaler = StandardScaler()
 X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train_roi), columns=X_train_roi.columns)
 
 print("-> Training intermediate SVM for SHAP screening...")
-screening_svm = SVC(kernel='rbf', gamma='scale', probability=True, random_state=RANDOM_STATE)
+screening_svm = SVC(kernel='rbf', gamma='scale', probability=True, class_weight='balanced', random_state=RANDOM_STATE)
 screening_svm.fit(X_train_scaled, y_train)
 
 # ==========================================

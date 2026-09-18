@@ -27,10 +27,10 @@ sys.path.append(str(current_dir.parent))
 from config import RANDOM_STATE, PROCESSED_DATA_DIR, BEST_BANDS
 
 if len(BEST_BANDS) < 2:
-    sys.exit("🚨 Fout: Zet tenminste 2 banden in 'BEST_BANDS' (config.py) voor de fusion!")
+    sys.exit("Fout: Zet tenminste 2 banden in 'BEST_BANDS' (config.py) voor de fusion!")
 
 b1, b2 = BEST_BANDS[0].lower(), BEST_BANDS[1].lower()
-print(f"🚀 STARTING CROSS-FREQUENCY FUSION EXPERIMENT ({b1.upper()} + {b2.upper()})")
+print(f"STARTING CROSS-FREQUENCY FUSION EXPERIMENT ({b1.upper()} + {b2.upper()})")
 
 # =============================================================================
 # 1. LOAD DATA & DYNAMIC FEATURES
@@ -44,25 +44,39 @@ try:
 except FileNotFoundError:
     sys.exit(f"🚨 Fout: Zorg dat Script 2 voor zowel {b1.upper()} als {b2.upper()} is gedraaid!")
 
-# Schaal uitsluitend de 20 benodigde features in één snelle stap
-X_train_scaled = pd.DataFrame(StandardScaler().fit_transform(train_df[top_10_1 + top_10_2]), columns=top_10_1 + top_10_2)
+features_fusion = top_10_1 + top_10_2
+X_train_raw = train_df[features_fusion]
 
 # =============================================================================
 # 2. K-FOLD SETUP & mSFFS ALGORITHM
 # =============================================================================
-# Bouw de 50 splits in één efficiënte list comprehension
+# Bouw de 50 splits in één efficiënte list comprehension op ongeschaalde data
 cv_splits = [fold for seed in range(10) for fold in StratifiedGroupKFold
              (n_splits=5, 
                 shuffle=True, 
-                random_state=RANDOM_STATE + seed).split(X_train_scaled, 
-                                                        y_train, 
-                                                        groups=groups_train)]
+                random_state=RANDOM_STATE + seed).split(X_train_raw, y_train, groups=groups_train)]
 
-print(f"-> Running mSFFS on the combined {len(X_train_scaled.columns)} features...")
-base_svm = SVC(kernel='rbf', gamma='scale', class_weight='balanced', random_state=RANDOM_STATE)
+print(f"-> Running mSFFS on the combined {len(X_train_raw.columns)} features...")
 
-sfs = SFS(base_svm, k_features=(1, 20), forward=True, floating=True, scoring='balanced_accuracy', cv=cv_splits, n_jobs=-1)
-sfs = sfs.fit(X_train_scaled, y_train)
+from sklearn.pipeline import make_pipeline
+
+fusion_pipeline = make_pipeline(
+    StandardScaler(),
+    SVC(kernel='rbf', gamma='scale', class_weight='balanced', random_state=RANDOM_STATE)
+)
+
+
+sfs = SFS(
+    fusion_pipeline, 
+    k_features=(1, 20), 
+    forward=True, 
+    floating=True, 
+    scoring='balanced_accuracy', 
+    cv=cv_splits, 
+    n_jobs=-1
+)
+
+sfs = sfs.fit(X_train_raw, y_train)
 
 # =============================================================================
 # 3. EVALUATE RESULTS
@@ -74,7 +88,7 @@ best_k = max(metric_dict.keys(), key=lambda k: np.mean(metric_dict[k]['cv_scores
 final_features = list(metric_dict[best_k]['feature_names'])
 
 print("\n" + "="*70)
-print(f"🏆 FUSION RESULTS (Optimal subset at k={best_k})")
+print(f"FUSION RESULTS (Optimal subset at k={best_k})")
 print("="*70)
 print(f"-> Max Cross-Validation Accuracy: {np.mean(metric_dict[best_k]['cv_scores']):.4f}")
 print(f"-> Selected Biomarkers: {', '.join(final_features)}")
@@ -83,7 +97,7 @@ print(f"-> Selected Biomarkers: {', '.join(final_features)}")
 has_b1 = any(f'({b1})' in f for f in final_features)
 has_b2 = any(f'({b2})' in f for f in final_features)
 
-print("\n💡 CONCLUSIE:")
+print("\nCONCLUSIE:")
 if has_b1 and has_b2:
     print(f"YES! Het algoritme combineert {b1.upper()} en {b2.upper()}. Ze zijn complementair!")
 else:

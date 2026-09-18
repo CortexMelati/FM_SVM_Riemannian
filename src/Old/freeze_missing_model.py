@@ -37,7 +37,7 @@ def freeze_cov_model():
         ('svm', SVC(class_weight='balanced', probability=True, random_state=RANDOM_STATE, **p_dict))
     ])
 
-    # 4. Train hem (dit duurt ~1 seconde op je i7)
+    # 4. Train hem 
     pipe.fit(X_covs, y)
 
     # 5. Sla hem op als .pkl voor Script 5

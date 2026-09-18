@@ -40,7 +40,7 @@ for file in feature_files:
     all_data.append(pd.read_csv(file))
     
 master_df = pd.concat(all_data, ignore_index=True)
-master_df = master_df.copy() # <-- FIX: This resolves the PerformanceWarning!
+master_df = master_df.copy() 
 
 # --- EC FILTERING ---
 if 'Condition' in master_df.columns:

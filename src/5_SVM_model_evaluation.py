@@ -34,14 +34,16 @@ import joblib
 
 
 from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
                              roc_auc_score, confusion_matrix, brier_score_loss,
                              average_precision_score, balanced_accuracy_score)
 from sklearn.utils import shuffle
 
+
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
-from config import (PROCESSED_DATA_DIR, SVM_FIGURES_DIR, SVM_DATA_DIR, BANDS, CP_FM_DIR, RANDOM_STATE)
+from config import (PROCESSED_DATA_DIR, SVM_FIGURES_DIR, SVM_DATA_DIR, BANDS, CP_FM_DIR, RANDOM_STATE, SAVED_MODELS_DIR)
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -135,31 +137,36 @@ def plot_permutation_distribution(permuted_scores, actual_acc, pvalue, target_ba
     
     plt.figure(figsize=(8, 6))
     
-    # Gebruik KDE (Kernel Density Estimation) in plaats van harde histogram bins
+    
     sns.kdeplot(
         permuted_scores, 
         fill=True, 
         color='#93c59e', 
         alpha=0.6, 
         linewidth=2.5,
-        bw_adjust=1.5, # Maakt de curve net iets vloeiender bij discrete kleine datasets
+        bw_adjust=1.5, 
         label='Permuted Scores (Null Distribution)'
     )
     
-    # Lijn voor de daadwerkelijke model score
+    
     plt.axvline(actual_acc, color='#d62728', linestyle='dashed', linewidth=2.5, 
                 label=f'Actual Model Score ({actual_acc:.4f})')
     
-    # Lijn voor het gemiddelde toevalsniveau
+    
     plt.axvline(np.mean(permuted_scores), color='black', linestyle='dotted', linewidth=2, 
                 label=f'Chance Level (Mean: {np.mean(permuted_scores):.4f})')
 
-    plt.title(f"Permutation Test Distribution (1000 Iterations)\n({target_band.upper()} Band - p = {pvalue:.4f})", fontsize=14, pad=15)
-    plt.xlabel('Balanced Accuracy', fontsize=12)
-    plt.ylabel('Density', fontsize=12)
+
+    plt.title(f"Permutation Test Distribution (1000 Iterations)\n({target_band.upper()} Band - p = {pvalue:.4f})", fontsize=16, pad=15)
+    plt.xlabel('Balanced Accuracy', fontsize=16)
+    plt.ylabel('Density', fontsize=16)
     
-    # Verplaats de legenda naar een mooie plek
-    plt.legend(frameon=True, loc='upper left', fontsize=10)
+
+    plt.xticks(fontsize=14)
+    plt.yticks(fontsize=14)
+    
+
+    plt.legend(frameon=False, loc='upper left', fontsize=12)
 
     ax = plt.gca()
     ax.spines['top'].set_visible(False)
@@ -175,7 +182,7 @@ def plot_permutation_distribution(permuted_scores, actual_acc, pvalue, target_ba
 
 
 def evaluate_all_svm_bands():
-    print("🚀 STARTING STEP 5: AUTOMATED SVM EVALUATION FOR ALL BANDS")
+    print("STARTING STEP 5: AUTOMATED SVM EVALUATION FOR ALL BANDS")
 
     # =============================================================================
     # 1. LOAD TEST DATA & FILTER (Load only once for all bands)
@@ -209,36 +216,31 @@ def evaluate_all_svm_bands():
     # =============================================================================
     for band_name in BANDS.keys():
         band_name_lower = band_name.lower()
-        model_path = SVM_DATA_DIR / f"saved_model_{band_name_lower}.pkl"
+        model_path = SAVED_MODELS_DIR / f"saved_model_{band_name_lower}.pkl"
         
         if not model_path.exists():
-            print(f"\n⚠️ Skipping {band_name.upper()} band (Model not found: {model_path.name})")
+            print(f"\nSkipping {band_name.upper()} band (Model not found: {model_path.name})")
             continue
             
         print(f"\n{'='*50}\n📡 ANALYZING BAND: {band_name.upper()}\n{'='*50}")
             
+  
         artifact = joblib.load(model_path)
-        final_svm = artifact['model']
-        scaler = artifact['scaler']
+        pipeline = artifact['pipeline']
         selected_features = artifact['features']
         train_mean = artifact.get('training_accuracy', 0.0) 
         train_std = artifact.get('training_std', 0.0)     
 
-        print(f"-> Loaded frozen model trained on {len(selected_features)} features.")
+        print(f"-> Loaded frozen pipeline trained on {len(selected_features)} features.")
 
-        # Prepare exactly as during training
+  
         X_test_final = test_df[selected_features]
-        X_test_scaled = pd.DataFrame(scaler.transform(X_test_final), columns=selected_features)
 
-        # 3. EXTERNAL VALIDATION (Metrics & Confusion Matrix)
-        print("-> Predicting on Unseen Data...")
-        y_pred = final_svm.predict(X_test_scaled)
-        y_prob = final_svm.predict_proba(X_test_scaled)[:, 1]
-        
-        # 3. EXTERNAL VALIDATION (Subject-Level & Metrics)
+        # 2. EXTERNAL VALIDATION (Epoch Level)
         print("-> Predicting on Unseen Data (Epoch Level)...")
-        y_pred_epochs = final_svm.predict(X_test_scaled)
-        y_prob_epochs = final_svm.predict_proba(X_test_scaled)[:, 1]
+
+        y_pred_epochs = pipeline.predict(X_test_final)
+        y_prob_epochs = pipeline.predict_proba(X_test_final)[:, 1]
 
         # --- APPLY MAJORITY VOTING FOR SUBJECT-LEVEL EVALUATION ---
         print("-> Aggregating predictions to Subject-Level...")
@@ -249,14 +251,15 @@ def evaluate_all_svm_bands():
             'Pred_Prob': y_prob_epochs
         })
 
-        # Calculate the majority vote and average probability per subject
         df_subject = df_preds.groupby('Subject').agg(
             True_Label=('True_Label', 'first'), 
             Pred_Class=('Pred_Class', lambda x: x.mode()[0]), # Majority Vote
+            Consistency=('Pred_Class', lambda x: (x == x.mode()[0]).mean()),
             Pred_Prob=('Pred_Prob', 'mean') # Average confidence
         ).reset_index()
+        
+        mean_consistency = df_subject['Consistency'].mean()
 
-        # Extract arrays for metric calculation
         y_test_sub = df_subject['True_Label'].values
         y_pred_sub = df_subject['Pred_Class'].values
         y_prob_sub = df_subject['Pred_Prob'].values
@@ -264,8 +267,8 @@ def evaluate_all_svm_bands():
         print(f"-> Evaluation compressed from {len(y_test)} epochs to {len(y_test_sub)} unique subjects.")
 
         # --- CALCULATE METRICS ---
-        # Let op: de metrics gebruiken nu de '_sub' variabelen!
         acc = accuracy_score(y_test_sub, y_pred_sub)
+        bal_acc = balanced_accuracy_score(y_test_sub, y_pred_sub) 
         prec = precision_score(y_test_sub, y_pred_sub, zero_division=0)
         rec = recall_score(y_test_sub, y_pred_sub, zero_division=0)
         auc = roc_auc_score(y_test_sub, y_prob_sub)
@@ -273,37 +276,38 @@ def evaluate_all_svm_bands():
         brier = brier_score_loss(y_test_sub, y_prob_sub)
         ece = expected_calibration_error(y_test_sub, y_prob_sub)
         
-        # Berekening van False Positive Rate (FPR) en False Negative Rate (FNR)
         tn, fp, fn, tp = confusion_matrix(y_test_sub, y_pred_sub).ravel()
         fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
         fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
         
+        # --- PERMUTATION TEST ---
         n_permutations = 1000
         permuted_scores = []
         for i in range(n_permutations):
-            # Hussel de test labels willekeurig subject lvl
             y_test_shuffled = shuffle(y_test_sub, random_state=RANDOM_STATE + i)
             score = balanced_accuracy_score(y_test_shuffled, y_pred_sub)
             permuted_scores.append(score)
 
-        # Bereken de p-waarde (hoe vaak was de gehusselde score gelijk aan of beter dan de echte score?)
-        pvalue = (np.sum(np.array(permuted_scores) >= acc) + 1) / (n_permutations + 1)
+        # GEFIXT: P-waarde vergelijkt nu bal_acc met permuted bal_acc scores
+        pvalue = (np.sum(np.array(permuted_scores) >= bal_acc) + 1) / (n_permutations + 1)
 
         print(f"\nPERMUTATION TEST (Test Set - Subject Level):")
-        print(f"-> True Model Accuracy: {acc:.4f}")
+        print(f"-> True Model Balanced Accuracy: {bal_acc:.4f}")
         print(f"-> P-value: {pvalue:.4f}")
 
-        plot_permutation_distribution(permuted_scores, acc, pvalue, band_name_lower)
+        plot_permutation_distribution(permuted_scores, bal_acc, pvalue, band_name_lower)
         
     
-        # Log metrics to final results table
-        # Extract C, gamma, kernel from the final_svm model (assuming it's an SVC)
-        opt_params = f"C={final_svm.C}, g={final_svm.gamma:.4f}, {final_svm.kernel}"        
+
+        svm_step = pipeline.named_steps['svc']
+        opt_params = f"C={svm_step.C}, g={svm_step.gamma:.4f}, {svm_step.kernel}"        
+        
         final_results.append({
             'Band': band_name.upper(),
             'Optimal_Params': opt_params,
+            'Consistency': f"{mean_consistency:.2%}",
             'CV_Training_Score': f"{train_mean:.3f} ± {train_std:.3f}",
-            'Bal_Accuracy': f"{acc:.2%}",
+            'Bal_Accuracy': f"{bal_acc:.2%}", # Aangepast naar Bal_Accuracy voor de tabel
             'Sensitivity': f"{rec:.2%}",
             'Precision': f"{prec:.2%}",
             'FPR': f"{fpr:.2%}",
@@ -315,11 +319,12 @@ def evaluate_all_svm_bands():
             'Permutation_P': f"{pvalue:.4f}"  
         })
 
-        # Save Individual Text Report
+        # Save Individual Text Report (Aangepast)
         report_text = (
             f"====================================================\n"
             f" FINAL TEST SET METRICS SUBJECT - {band_name.upper()} BAND \n"
             f"====================================================\n"
+            f"Balanced Accuracy: {bal_acc:.4f}\n"
             f"Accuracy:        {acc:.4f}\n"
             f"Precision:       {prec:.4f}\n"
             f"Recall:          {rec:.4f}\n"
@@ -330,6 +335,7 @@ def evaluate_all_svm_bands():
             f"Brier Score:     {brier:.4f}\n"
             f"ECE:             {ece:.4f}\n"
             f"Permutation P:   {pvalue:.4f}\n"
+            f"Intra-Subject Consistency: {mean_consistency:.2%}\n" 
             f"====================================================\n"
         )
         report_path = SVM_DATA_DIR / f"final_test_metrics_report_{band_name_lower}.txt"
@@ -338,12 +344,29 @@ def evaluate_all_svm_bands():
 
         # Plot Confusion Matrix
         cm = confusion_matrix(y_test_sub, y_pred_sub)
+        annot_labels = np.empty_like(cm, dtype=object)
+        
+        if cm.shape == (2, 2):
+            TN_subjs = df_subject[(df_subject['True_Label'] == 0) & (df_subject['Pred_Class'] == 0)]['Subject']
+            FP_subjs = df_subject[(df_subject['True_Label'] == 0) & (df_subject['Pred_Class'] == 1)]['Subject']
+            FN_subjs = df_subject[(df_subject['True_Label'] == 1) & (df_subject['Pred_Class'] == 0)]['Subject']
+            TP_subjs = df_subject[(df_subject['True_Label'] == 1) & (df_subject['Pred_Class'] == 1)]['Subject']
+            
+            annot_labels[0, 0] = f"{cm[0, 0]}\n({len(df_preds[df_preds['Subject'].isin(TN_subjs)])} epochs)"
+            annot_labels[0, 1] = f"{cm[0, 1]}\n({len(df_preds[df_preds['Subject'].isin(FP_subjs)])} epochs)"
+            annot_labels[1, 0] = f"{cm[1, 0]}\n({len(df_preds[df_preds['Subject'].isin(FN_subjs)])} epochs)"
+            annot_labels[1, 1] = f"{cm[1, 1]}\n({len(df_preds[df_preds['Subject'].isin(TP_subjs)])} epochs)"
+        else:
+            for i in range(cm.shape[0]):
+                for j in range(cm.shape[1]):
+                    annot_labels[i, j] = str(cm[i, j])
+
         plt.figure(figsize=(6, 5))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+        sns.heatmap(cm, annot=annot_labels, fmt='', cmap='Blues', 
                     xticklabels=['Healthy (0)', 'Fibro (1)'], 
                     yticklabels=['Healthy (0)', 'Fibro (1)'],
-                    annot_kws={"size": 16})
-        plt.title(f'{band_name.upper()} Band FINAL Validation\nSubject-Level (Accuracy: {acc:.2%})', fontsize=14)
+                    annot_kws={"size": 13})
+        plt.title(f'{band_name.upper()} Band FINAL Validation\nSubject-Level (Bal. Acc: {bal_acc:.2%})', fontsize=14)
         plt.ylabel('True Clinical Diagnosis', fontsize=12)
         plt.xlabel('Predicted Diagnosis', fontsize=12)
         plt.tight_layout()
@@ -352,8 +375,10 @@ def evaluate_all_svm_bands():
 
         # 4. GENERATE FIGURE 5 (t-SNE Projection)
         print(f"  -> Generating t-SNE data distribution (Fig 5)...")
-        tsne = TSNE(n_components=2, perplexity=min(30, len(X_test_scaled)-1), random_state=RANDOM_STATE)
-        X_tsne = tsne.fit_transform(X_test_scaled)
+
+        X_tsne_scaled = StandardScaler().fit_transform(X_test_final)
+        tsne = TSNE(n_components=2, perplexity=min(30, len(X_test_final)-1), random_state=RANDOM_STATE)
+        X_tsne = tsne.fit_transform(X_tsne_scaled)
 
         plt.figure(figsize=(8, 6))
         scatter = sns.scatterplot(
@@ -371,21 +396,26 @@ def evaluate_all_svm_bands():
         ax.spines['right'].set_visible(False)
 
         handles, labels = scatter.get_legend_handles_labels()
-        plt.legend(handles=handles, labels=['Healthy Control (HC)', 'Fibromyalgia (FM)'], title='Diagnosis', frameon=True)
+        plt.legend(handles=handles, labels=['Healthy Control (HC)', 'Fibromyalgia (FM)'], title='Diagnosis', frameon=False)
         plt.tight_layout()
         plt.savefig(SVM_FIGURES_DIR / f"Figure_5_tsne_distribution_{band_name_lower}.png", dpi=300, facecolor='white', bbox_inches='tight')
         plt.close()
 
         # 5. SHAP ANALYSIS
         print("  -> Calculating SHAP values for interpretability...")
-        # explainer = shap.KernelExplainer(final_svm.predict_proba, shap.kmeans(X_test_scaled, 10))
+        features_display = X_test_final.columns.tolist()
         
-        background = shap.kmeans(X_test_scaled, 10)
-        explainer = shap.KernelExplainer(final_svm.predict_proba, background)
+        def predict_wrapper(X):
+            if isinstance(X, np.ndarray):
+                X = pd.DataFrame(X, columns=features_display)
+            return pipeline.predict_proba(X)
+        
+        background = shap.kmeans(X_test_final, 10)
+        
+        explainer = shap.KernelExplainer(predict_wrapper, background)
         np.random.seed(RANDOM_STATE)
         
-        
-        shap_values = explainer.shap_values(X_test_scaled)
+        shap_values = explainer.shap_values(X_test_final)
 
         if isinstance(shap_values, list):
             shap_values_fm = shap_values[1]
@@ -394,11 +424,10 @@ def evaluate_all_svm_bands():
         else:
             shap_values_fm = shap_values
 
-        features_display = X_test_scaled.columns.tolist()
 
         # Plot Fig 6A (Bar Plot) with Data Labels
         plt.figure(figsize=(10, 8)) 
-        shap.summary_plot(shap_values_fm, X_test_scaled, plot_type="bar", feature_names=features_display, show=False)
+        shap.summary_plot(shap_values_fm, X_test_final, plot_type="bar", feature_names=features_display, show=False)
 
         ax = plt.gca()
         for patch in ax.patches:
@@ -418,7 +447,7 @@ def evaluate_all_svm_bands():
 
         # Plot Fig 6B (Summary Plot)
         plt.figure(figsize=(10, 8)) 
-        shap.summary_plot(shap_values_fm, X_test_scaled, feature_names=features_display, show=False)
+        shap.summary_plot(shap_values_fm, X_test_final, feature_names=features_display, show=False)
         plt.title(f"{band_name.upper()} Band - SHAP Values Summary", fontsize=14, pad=15)
         plt.xlabel("SHAP value (Impact on specific prediction)", fontsize=12)
         plt.tight_layout()
@@ -431,7 +460,7 @@ def evaluate_all_svm_bands():
         if participants_df is not None:
             print("  -> Evaluating Algorithmic Bias for Demographic Subgroups (Subject Level)...")
             
-            # Koppel direct df_subject (waarin per patiënt 1 rij staat) aan de demografische data
+
             merged_df = pd.merge(df_subject, participants_df, on='Subject', how='inner')
 
             if not merged_df.empty:
@@ -480,13 +509,13 @@ def evaluate_all_svm_bands():
         csv_path = SVM_DATA_DIR / "final_svm_test_table.csv"
         results_df.to_csv(csv_path, index=False)
         
-        print(f"\n{'='*70}\n🏆 ALL SVM BANDS EVALUATED SUCCESSFULLY!\n{'='*70}")
+        print(f"\n{'='*70}\nALL SVM BANDS EVALUATED SUCCESSFULLY!\n{'='*70}")
         print("Here is your final data for LaTeX Table 1:\n")
         print(results_df.to_string(index=False))
-        print(f"\n✅ Master table saved to: svm_data/{csv_path.name}")
-        print("✅ All figures and reports saved to: svm_figures/ and svm_data/")
+        print(f"\nMaster table saved to: svm_data/{csv_path.name}")
+        print("All figures and reports saved to: svm_figures/ and svm_data/")
     else:
-        print("\n⚠️ No trained models were found. Please make sure to run Scripts 1-4 for your bands first.")
+        print("\nNo trained models were found. Please make sure to run Scripts 1-4 for your bands first.")
 
 if __name__ == "__main__":
     evaluate_all_svm_bands()

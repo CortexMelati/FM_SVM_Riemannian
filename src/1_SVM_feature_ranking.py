@@ -46,7 +46,7 @@ X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train_raw), columns=X_train
 
 # 3. Train a quick baseline SVM on all features
 print("-> Training baseline SVM on the full feature space...")
-global_svm = SVC(kernel='rbf', gamma='scale', probability=True, random_state=RANDOM_STATE)
+global_svm = SVC(kernel='rbf', gamma='scale', probability=True, class_weight='balanced', random_state=RANDOM_STATE)
 global_svm.fit(X_train_scaled, y_train)
 
 # 4. Calculate SHAP Values
@@ -80,7 +80,7 @@ top_10_features = feature_importance.head(10)
 print("\nTOP 10 GLOBAL FEATURES:")
 print(top_10_features.to_string(index=False))
 
-# 6. Custom Horizontal Bar Plot (Figure 1 replication with data labels)
+# 6. Custom Horizontal Bar Plot
 # We recreate the SHAP summary plot manually to add the numerical values
 plt.figure(figsize=(12, 8))
 
@@ -90,17 +90,23 @@ plot_df = top_10_features.sort_values(by='Mean_Abs_SHAP', ascending=True)
 # Create the horizontal bars (using the standard SHAP blue color)
 bars = plt.barh(plot_df['Feature'], plot_df['Mean_Abs_SHAP'], color='#1f77b4', height=0.6)
 
+max_width = plot_df['Mean_Abs_SHAP'].max()
+offset = max_width * 0.015
+
 # Add the numerical labels slightly to the right of each bar
 for bar in bars:
     width = bar.get_width()
-    plt.text(width + 0.001,  # x-position (slightly to the right of the bar)
-             bar.get_y() + bar.get_height() / 2, # y-position (centered)
-             f"{width:.4f}", # format to 4 decimal places
-             ha='left', va='center', fontsize=10, color='black')
+    plt.text(width + offset,  
+             bar.get_y() + bar.get_height() / 2, 
+             f"{width:.4f}", 
+             ha='left', va='center', fontsize=14, color='black')
 
 # Styling to match typical academic plots
-plt.xlabel("Mean |SHAP value|", fontsize=12)
-plt.ylabel("Connectivity Feature", fontsize=12)
+plt.xlabel("Mean |SHAP value|", fontsize=16)
+plt.ylabel("Connectivity Feature", fontsize=16)
+
+plt.xticks(fontsize=14)
+plt.yticks(fontsize=14)
 
 # Remove top and right spines for a cleaner look
 ax = plt.gca()
@@ -112,9 +118,13 @@ current_xlim = ax.get_xlim()
 ax.set_xlim(current_xlim[0], current_xlim[1] * 1.15) 
 
 plt.tight_layout()
+
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 plot_path = FIGURES_DIR / "Figure_1_Global_SHAP_Ranking.png"
-plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+plt.savefig(str(plot_path), dpi=300, bbox_inches='tight')
 plt.close()
+
+print(f"✅ Plot succesvol opgeslagen als: {plot_path}")
 # ====================================================================
 # Channel Importance ("Without the connections")
 # ====================================================================

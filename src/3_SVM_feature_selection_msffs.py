@@ -7,7 +7,7 @@ Overview:
     restricted ROI feature space. It evaluates subsets of increasing sizes 
     (from 1 to 20 features) using Stratified Group K-Fold cross-validation.
     
-    we select the top 5 to train on for the SVM model. 
+    we select the top 7 to train on for the SVM model. 
     
     It replicates Figure 3 and exports the definitive list of optimal features.
 
@@ -23,6 +23,8 @@ from pathlib import Path
 import sys
 
 from sklearn.svm import SVC
+from sklearn.pipeline import make_pipeline
+from sklearn.metrics import balanced_accuracy_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import StratifiedGroupKFold
 from mlxtend.feature_selection import SequentialFeatureSelector as SFS
@@ -35,40 +37,45 @@ from config import (RESULTS_DIR, RANDOM_STATE, PROCESSED_DATA_DIR, SVM_DATA_DIR,
 # =============================================================================
 # PUBLICATION PLOT FUNCTION
 # =============================================================================
-def plot_msffs_curve(features_count, train_scores, cv_scores, cv_std, ci_margins, target_band):
+def plot_msffs_curve(features_count, train_scores, cv_scores, cv_std, target_band):
     plt.figure(figsize=(12, 6))
     x_axis = np.array(features_count)
     
-    # Het schaduwvlak blijft de ±1 SD (label aangepast voor statistische accuraatheid)
+    # Het schaduwvlak (±1 SD)
     plt.fill_between(x_axis, cv_scores - cv_std, cv_scores + cv_std, 
                      color="#93c59e", alpha=0.7, label='Standard Deviation (±1 SD)')
     
-    plt.plot(x_axis, cv_scores, marker='o', markersize=4, color='#5c8cbc', lw=1.5, label='Cross-validation accuracy')
-    plt.plot(x_axis, train_scores, marker='o', markersize=4, color='#fba232', lw=1.5, label='Training accuracy')
+    plt.plot(x_axis, cv_scores, marker='o', markersize=5, color='#5c8cbc', lw=2, label='Cross-validation accuracy')
+    plt.plot(x_axis, train_scores, marker='o', markersize=5, color='#fba232', lw=2, label='Training accuracy')
     
-    # AANGEPAST: We printen nu de CI marge (±) in plaats van de SD
-    for i, (tr, cv, ci) in enumerate(zip(train_scores, cv_scores, ci_margins)):
-        plt.text(x_axis[i], tr + 0.002, f"{tr:.3f}", color='#fba232', fontsize=9, ha='center', va='bottom')
-        # We printen de 95% CI (±) direct onder de CV accuracy
-        plt.text(x_axis[i], cv - 0.003, f"{cv:.3f}\n(±{ci:.3f})", color='#5c8cbc', fontsize=8, ha='center', va='top')
+    # Let op: ik gebruik hier cv_std zodat de tekst exact overeenkomt met de groene band.
+    for i, (tr, cv, std) in enumerate(zip(train_scores, cv_scores, cv_std)):
+        # Train score (boven)
+        plt.text(x_axis[i], tr + 0.015, f"{tr:.3f}", color='#d98218', fontsize=11, ha='center', va='bottom')
+        # CV score + STD (onder) in een compact format
+        plt.text(x_axis[i], cv - 0.015, f"{cv:.3f}\n±{std:.3f}", color='#3b688c', fontsize=10, ha='center', va='top')
 
-    plt.title(f"Classification accuracy scores when searching in ROI ({target_band.upper()} band)", fontsize=12, pad=20)
-    plt.xlabel('Number of features used', fontsize=11)
-    plt.ylabel('Accuracy', fontsize=11)
-    plt.xticks(np.arange(min(features_count), max(features_count)+1, 1.0))
-    plt.ylim([min(cv_scores - cv_std) - 0.05, 1.05])
+    plt.title(f"Classification accuracy scores when searching in ROI ({target_band.upper()} band)", fontsize=16, pad=20)
+    plt.xlabel('Number of features used', fontsize=14)
+    plt.ylabel('Accuracy', fontsize=14)
+    
+    plt.xticks(np.arange(min(features_count), max(features_count)+1, 1.0), fontsize=12)
+    plt.yticks(fontsize=12)
+    
+    plt.ylim([min(cv_scores - cv_std) - 0.08, 1.10])
     
     ax = plt.gca()
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    plt.legend(loc='lower right', frameon=True)
+    
+    plt.legend(loc='lower right', frameon=True, fontsize=12)
     plt.tight_layout()
     
     plot_path = SVM_FIGURES_DIR / f"Figure_3_mSFFS_curve_{target_band}.png"
     plt.savefig(plot_path, dpi=300)
     plt.close()
     print(f"-> mSFFS Learning curve (Figure 3) saved to {plot_path.name}")
-
+    
 # =============================================================================
 # 1. LOAD TRAINING DATA & IMPORT SCRIPT 2 FEATURES
 # =============================================================================
@@ -110,35 +117,36 @@ print(f"-> Added 10 remaining ROI features to create the search pool.")
 print(f"-> Search space strictly constrained to {len(X_train_roi.columns)} features.")
 
 # =============================================================================
-# 2. SCALING & REPEATED STRATIFIED GROUP K-FOLD (5 Folds x 10 Repeats)
+# 2. CROSS-VALIDATION STRATEGY (5 Folds x 10 Repeats)
 # =============================================================================
-scaler = StandardScaler()
-X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train_roi), columns=X_train_roi.columns)
-
 cv_splits = []
-# We herhalen de 5-fold splitsing 10 keer met een verschuivende random state
+
 for seed_offset in range(10): 
     cv_strategy = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE + seed_offset)
-    cv_splits.extend(list(cv_strategy.split(X_train_scaled, y_train, groups=groups_train)))
+    # We sturen de indices terug op basis van de ORIGINELE (ongeschaalde) data
+    cv_splits.extend(list(cv_strategy.split(X_train_roi, y_train, groups=groups_train)))
 
 print(f"-> Created {len(cv_splits)} cross-validation folds (10 repeats of 5-fold CV).")
-
 
 # =============================================================================
 # 3. mSFFS ALGORITHM
 # =============================================================================
 print("-> Running mSFFS algorithm (Evaluating subsets from 1 to 20 features)...")
-# Amend to settings from script 4 if needed 
-base_svm = SVC(
-    kernel='rbf', 
-    # C=10, 
-    gamma='scale', 
-    class_weight='balanced', 
-    random_state=RANDOM_STATE
+
+# Bouw een pipeline die eerst schaalt en dan de SVM traint. 
+# Dit garandeert dat er in elke CV-fold onafhankelijk wordt geschaald.
+base_svm_pipeline = make_pipeline(
+    StandardScaler(),
+    SVC(
+        kernel='rbf', 
+        gamma='scale', 
+        class_weight='balanced', 
+        random_state=RANDOM_STATE
+    )
 )
 
 sfs = SFS(
-    base_svm, 
+    base_svm_pipeline, 
     k_features=(1, 20),
     forward=True,
     floating=True,
@@ -147,7 +155,7 @@ sfs = SFS(
     n_jobs=-1              
 )
 
-sfs = sfs.fit(X_train_scaled, y_train)
+sfs = sfs.fit(X_train_roi, y_train)
 metric_dict = sfs.get_metric_dict()
 
 
@@ -196,8 +204,8 @@ print("\n" + "="*85)
 print(f"{'k':<3} | {'Added/Changed Feature':<25} | {'Mean Acc':<9} | {'Std Dev':<8} | {'95% CI'}")
 print("-" * 85)
 
-# AANGEPAST: ci_margins lijst toegevoegd om door te geven aan de plot
-f_counts, cv_scores, cv_stds, tr_scores, ci_margins = [], [], [], [], []
+# ci_margins variabele verwijderd, deze gebruiken we niet voor de plot
+f_counts, cv_scores, cv_stds, tr_scores = [], [], [], []
 stats_results = [] 
 max_acc = 0
 optimal_k = 1
@@ -205,7 +213,7 @@ optimal_k = 1
 for k in range(1, len(metric_dict) + 1):
     if k not in metric_dict: continue
     
-    # Bepaal welke feature bij deze stap is toegevoegd (of verwijderd via floating)
+    # Feature diff logic 
     if k == 1:
         step_feature = f"+{metric_dict[k]['feature_names'][0]}"
     else:
@@ -223,35 +231,35 @@ for k in range(1, len(metric_dict) + 1):
     fold_scores = metric_dict[k]['cv_scores']
     mean_acc = np.mean(fold_scores)
     std_acc = np.std(fold_scores)
-    n_folds = 50
+    n_folds = 50 
     
     # Calculate 95% Confidence Interval
     ci_margin = 1.96 * (std_acc / np.sqrt(n_folds))
     ci_lower, ci_upper = mean_acc - ci_margin, mean_acc + ci_margin
     ci_str = f"[{ci_lower:.4f} - {ci_upper:.4f}]"
 
-    # Print inclusief de specifieke feature
     print(f"{k:<3} | {step_feature:<25} | {mean_acc:.4f}   | {std_acc:.4f}   | {ci_str}")
     
-    # Sla de rij op voor de CSV export
     stats_results.append({
         'k': k,
         'Feature_Change': step_feature,
         'Current_Subset': ", ".join(metric_dict[k]['feature_names']),
-        'Mean_Acc': round(mean_acc, 4),
+        'Mean_Balanced_Acc': round(mean_acc, 4),
         'Std_Dev': round(std_acc, 4),
-        'CV_Score_Formatted': f"{mean_acc:.3f} ± {std_acc:.3f}"  
+        '95_CI_Margin': round(ci_margin, 4),
+        'CV_Score_Formatted_CI': f"{mean_acc:.3f} (± {ci_margin:.3f})"  
     })
     
-    # Data verzamelen voor de plot
     f_counts.append(k)
     cv_scores.append(mean_acc)
     cv_stds.append(std_acc)
-    ci_margins.append(ci_margin) # Sla de marge (bijv. 0.012) op voor de tekst in de plot
     
     subset = list(metric_dict[k]['feature_names'])
-    base_svm.fit(X_train_scaled[subset], y_train)
-    tr_scores.append(base_svm.score(X_train_scaled[subset], y_train))
+    
+    base_svm_pipeline.fit(X_train_roi[subset], y_train)
+    y_pred_train = base_svm_pipeline.predict(X_train_roi[subset])
+    tr_bal_acc = balanced_accuracy_score(y_train, y_pred_train)
+    tr_scores.append(tr_bal_acc)
     
     if mean_acc > max_acc:
         max_acc = mean_acc
@@ -270,7 +278,7 @@ print(f"-> Selected Biomarkers: {', '.join(final_features)}")
 # =============================================================================
 # 5. PLOT AND SAVE EXPORTS
 # =============================================================================
-plot_msffs_curve(f_counts, np.array(tr_scores), np.array(cv_scores), np.array(cv_stds), np.array(ci_margins), FOCUS_BAND)
+plot_msffs_curve(f_counts, np.array(tr_scores), np.array(cv_scores), np.array(cv_stds), FOCUS_BAND)
 
 # 5A. Save the statistical table
 stats_df = pd.DataFrame(stats_results)

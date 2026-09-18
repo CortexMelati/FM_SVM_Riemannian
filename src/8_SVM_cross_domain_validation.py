@@ -27,13 +27,14 @@ import seaborn as sns
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning) # Suppresses adapt library warnings
 
+from sklearn.pipeline import make_pipeline
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import balanced_accuracy_score, confusion_matrix
 
-# Ensure the ADAPT library is installed for TrAdaBoost
+
 try:
     from adapt.instance_based import TrAdaBoost
 except ImportError:
@@ -44,22 +45,24 @@ except ImportError:
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 from config import (PROCESSED_DATA_DIR, SVM_DATA_DIR, SVM_FIGURES_DIR, 
-                    FOCUS_BAND, CROSS_TARGET_DATASET, RANDOM_STATE)
+                    FOCUS_BAND, CROSS_TARGET_DATASET, RANDOM_STATE, SAVED_MODELS_DIR)
 
 print(f"Starting Cross-Domain Validation (Fig 7) for {FOCUS_BAND.upper()} band...")
 
 # =============================================================================
 # 1. LOAD DATA & ARTIFACTS
 # =============================================================================
-# A. Load Frozen Model Artifact (for hyperparameters & features)
-model_path = SVM_DATA_DIR / f"saved_model_{FOCUS_BAND}.pkl"
+model_path = SAVED_MODELS_DIR / f"saved_model_{FOCUS_BAND.lower()}.pkl"
 if not model_path.exists():
     print(f"Error: {model_path.name} not found. Run Script 4 first.")
     sys.exit()
     
 artifact = joblib.load(model_path)
-frozen_svm = artifact['model']
+frozen_pipeline = artifact['pipeline']
+frozen_svm = frozen_pipeline.named_steps['svc']
+source_scaler = frozen_pipeline.named_steps['standardscaler']
 selected_features = artifact['features']
+
 print(f"-> Loaded architecture: {len(selected_features)} features, C={frozen_svm.C}, gamma={frozen_svm.gamma}")
 
 # B. Load Source Data (Required for TrAdaBoost)
@@ -78,7 +81,6 @@ target_df = pd.read_csv(target_path)
 if 'Condition' in target_df.columns:
     target_df = target_df[target_df['Condition'] == 'EC'].copy()
     
-# Clean Target Domain NaNs just in case
 target_df = target_df.dropna(subset=['Target'] + selected_features).copy()
 
 print(f"-> Source Domain Data: {len(source_df)} segments.")
@@ -87,12 +89,10 @@ print(f"-> Target Domain Data: {len(target_df)} segments ({CROSS_TARGET_DATASET}
 # =============================================================================
 # 2. DATA PREPARATION (Strict Feature Isolation)
 # =============================================================================
-# We fit a fresh scaler on Source Data, and apply it to both
-scaler = StandardScaler()
-X_source = scaler.fit_transform(source_df[selected_features])
+X_source = source_scaler.transform(source_df[selected_features])
 y_source = source_df['Target'].values
 
-X_target = scaler.transform(target_df[selected_features])
+X_target = target_df[selected_features]
 y_target = target_df['Target'].values
 groups_target = target_df['Subject'].values
 
@@ -126,7 +126,7 @@ for n_splits in fold_range:
     train_subjects_count = []
     
     for train_idx, test_idx in cv_strategy.split(X_target, y_target, groups=groups_target):
-        # Haal de ruwe data op voor deze fold (onge-schaald)
+    
         X_tgt_tr_raw = target_df[selected_features].values[train_idx]
         X_tgt_te_raw = target_df[selected_features].values[test_idx]
         y_tgt_tr, y_tgt_te = y_target[train_idx], y_target[test_idx]
@@ -137,30 +137,32 @@ for n_splits in fold_range:
         # ---------------------------------------------------------
         # Method 1: DIRECT TRAINING (Volledig onafhankelijk)
         # ---------------------------------------------------------
-        # Fit een nieuwe scaler STRICT op de target training data van deze fold
-        direct_scaler = StandardScaler()
-        X_tgt_tr_direct = direct_scaler.fit_transform(X_tgt_tr_raw)
-        X_tgt_te_direct = direct_scaler.transform(X_tgt_te_raw)
         
-        direct_svm = SVC(C=frozen_svm.C, gamma=frozen_svm.gamma, kernel='rbf', random_state=RANDOM_STATE)
-        direct_svm.fit(X_tgt_tr_direct, y_tgt_tr)
-        acc_direct = balanced_accuracy_score(y_tgt_te, direct_svm.predict(X_tgt_te_direct))
+        direct_pipeline = make_pipeline(
+            StandardScaler(),
+            SVC(C=frozen_svm.C, gamma=frozen_svm.gamma, kernel='rbf', random_state=RANDOM_STATE)
+        )
+        # Fit direct_pipeline op de ONGESCHAALDE target training data
+        direct_pipeline.fit(X_tgt_tr_raw, y_tgt_tr)
+        acc_direct = balanced_accuracy_score(y_tgt_te, direct_pipeline.predict(X_tgt_te_raw))
         direct_scores.append(acc_direct)
         
         # ---------------------------------------------------------
         # Method 2: TRANSFER LEARNING (TrAdaBoost)
         # ---------------------------------------------------------
-        # Hier gebruiken we de originele Source scaler (wat methodologisch klopt voor transfer learning)
-        X_tgt_tr_transfer = scaler.transform(X_tgt_tr_raw)
-        X_tgt_te_transfer = scaler.transform(X_tgt_te_raw)
+        # originele Source scaler (wat methodologisch klopt voor transfer learning)
+        X_tgt_tr_transfer = source_scaler.transform(X_tgt_tr_raw)
+        X_tgt_te_transfer = source_scaler.transform(X_tgt_te_raw)
         
         boost_base = SVC(C=frozen_svm.C, gamma=frozen_svm.gamma, kernel='rbf', probability=True, random_state=RANDOM_STATE)
         tr_model = TrAdaBoost(estimator=boost_base, n_estimators=50, random_state=RANDOM_STATE)
+        
         tr_model.fit(X_source, y_source, Xt=X_tgt_tr_transfer, yt=y_tgt_tr)
         
         tgt_pred = tr_model.predict(X_tgt_te_transfer)
         acc_transfer = balanced_accuracy_score(y_tgt_te, tgt_pred)
         transfer_scores.append(acc_transfer)
+        
         
         if n_splits == max_safe_folds:
             final_y_true.extend(y_tgt_te)
@@ -231,14 +233,14 @@ print("PIPELINE COMPLETE.")
 # =============================================================================
 print("\n-> Applying Majority Voting for Subject-Level Clinical Evaluation...")
 
-# 1. Bundel de losse segmenten in een DataFrame
+
 df_preds = pd.DataFrame({
     'Subject': final_subjects,
     'True_Label': final_y_true,
     'Pred_Label': final_y_pred_transfer
 })
 
-# 2. Bereken de 'Majority Vote' per proefpersoon
+
 df_subject = df_preds.groupby('Subject').agg(
     True_Label=('True_Label', 'first'), # Het ware label is voor elk segment van deze patiënt hetzelfde
     Pred_Label=('Pred_Label', lambda x: x.mode()[0]) # De meest voorkomende voorspelling wint
